@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { HelpCircle } from 'lucide-react';
+import { MoreVertical } from 'lucide-react';
 import { useHymnal } from '../stores/HymnalProvider';
 
 export const TooltipIcon = ({ text, position = 'inline' }: { text: string; position?: 'inline' | 'bottom-right' | 'top-right' }) => {
@@ -28,8 +28,8 @@ export const TooltipIcon = ({ text, position = 'inline' }: { text: string; posit
       const rect = containerRef.current.getBoundingClientRect();
       const isTooRight = rect.right + 280 > window.innerWidth;
       setCoords({ 
-        top: rect.top + rect.height / 2, 
-        left: isTooRight ? rect.left - 290 : rect.right + 12 
+        top: Math.max(30, Math.min(window.innerHeight - 100, rect.top + rect.height / 2)), 
+        left: isTooRight ? Math.max(10, rect.left - 270) : rect.right + 8 
       });
     }
   };
@@ -40,35 +40,46 @@ export const TooltipIcon = ({ text, position = 'inline' }: { text: string; posit
     ? "absolute bottom-1.5 right-1.5 flex items-center justify-center z-10" 
     : position === 'top-right'
     ? "absolute top-1.5 right-1.5 flex items-center justify-center z-10"
-    : "relative inline-flex items-center ml-1";
-
-  const iconClass = position === 'bottom-right' || position === 'top-right'
-    ? `w-4 h-4 transition-colors cursor-help bg-white rounded-full shadow-sm ${isOpen ? 'text-indigo-600' : 'text-slate-300 hover:text-red-500'}`
-    : `w-4 h-4 transition-colors cursor-help ${isOpen ? 'text-indigo-600' : 'text-slate-400 hover:text-red-500'}`;
+    : "relative inline-flex items-center justify-center ml-auto shrink-0 w-4 h-4";
 
   return (
     <div 
       ref={containerRef}
       className={wrapperClass} 
-      onClick={e => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (!isOpen) updatePosition();
-        setIsOpen(!isOpen);
-      }}
       onMouseEnter={() => {
         updatePosition();
         setIsOpen(true);
       }}
-      onMouseLeave={() => setIsOpen(false)}
+      onMouseLeave={() => {
+        setIsOpen(false);
+      }}
+      onClick={e => {
+        e.preventDefault();
+        e.stopPropagation();
+        updatePosition();
+        setIsOpen(!isOpen);
+      }}
+      title="설명 보기"
     >
-      <HelpCircle className={iconClass} />
+      <button
+        type="button"
+        className={`w-4 h-4 rounded transition-all cursor-pointer flex items-center justify-center p-0 ${
+          isOpen 
+            ? 'text-[#2B2927] bg-[#EBE5DC]' 
+            : 'text-[#8C877D] hover:text-[#2B2927] hover:bg-[#DED8CE]/60'
+        }`}
+      >
+        <MoreVertical className="w-3.5 h-3.5 stroke-[1.8px]" />
+      </button>
+
       {isOpen && createPortal(
         <div 
-          className="fixed w-[280px] p-4 bg-slate-800 text-white text-[12px] font-bold leading-relaxed rounded-xl shadow-2xl text-left whitespace-pre-wrap z-[99999]"
+          className="fixed w-[260px] px-3.5 py-2.5 bg-[#2C2B29] text-[#FAF9F5] rounded-xl shadow-2xl border border-[#43403B] text-left z-[99999] pointer-events-none animate-in fade-in zoom-in-95 duration-150"
           style={{ top: coords.top, left: coords.left, transform: 'translateY(-50%)' }}
         >
-          {text}
+          <p className="text-xs text-[#FAF9F5] font-normal leading-relaxed whitespace-pre-wrap">
+            {text}
+          </p>
         </div>,
         document.body
       )}

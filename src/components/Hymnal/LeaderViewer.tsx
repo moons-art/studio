@@ -21,11 +21,12 @@ export const LeaderViewer: React.FC<LeaderViewerProps> = ({ onClose, onOpenLibra
   
   // 공동체 명칭 상태: localStorage에서 읽어오고 없으면 기본값 사용
   const [communityName, setCommunityName] = useState(() => {
-    return localStorage.getItem('ceum-community-name') || '세움CHURCH';
+    return localStorage.getItem('nations-community-name') || localStorage.getItem('ceum-community-name') || 'NATIONS CHURCH';
   });
 
   // 명칭 변경 시 localStorage에 즉시 저장
   useEffect(() => {
+    localStorage.setItem('nations-community-name', communityName);
     localStorage.setItem('ceum-community-name', communityName);
   }, [communityName]);
   
@@ -116,14 +117,14 @@ export const LeaderViewer: React.FC<LeaderViewerProps> = ({ onClose, onOpenLibra
         hymnalApi.writeClipboard(shareText);
         setGenFileId(result.fileId || null);
         setGenResultUrl(result.url); // 결과 URL 세팅 (자동으로 완료 UI 노출)
-      } else if (result.message === 'Need Auth') {
+      } else if (result.message === 'Need Auth' || result.message?.includes('authenticated')) {
         setIsGenerating(false);
-        const authUrl = await hymnalApi.getAuthUrl();
-        hymnalApi.openExternal(authUrl);
-        const code = await hymnalApi.waitForAuthCode();
-        if (code) {
-          await hymnalApi.confirmAuth(code);
-          alert('인증 성공! 다시 한번 [PDF 생성]을 눌러주세요.');
+        const { gdriveWebService } = await import('../../api/gdriveWebService');
+        const loginSuccess = await gdriveWebService.login();
+        if (loginSuccess) {
+          alert('구글 드라이브 인증이 완료되었습니다! 다시 [PDF 생성]을 눌러주세요.');
+        } else {
+          alert('구글 인증이 완료되지 않았습니다.');
         }
       } else {
         setIsGenerating(false);
@@ -139,11 +140,11 @@ export const LeaderViewer: React.FC<LeaderViewerProps> = ({ onClose, onOpenLibra
 
   if (visibleItems.length === 0) {
     return (
-      <div className="fixed inset-0 z-[10000] bg-slate-950 flex flex-col items-center justify-center text-white">
-        <p className="text-xl font-bold mb-4">현재 콘티에 배치된 악보가 없습니다.</p>
+      <div className="fixed inset-0 z-[10000] bg-[#FAF9F5] flex flex-col items-center justify-center text-[#2B2927]">
+        <p className="font-serif text-base font-bold mb-4">현재 콘티에 배치된 악보가 없습니다.</p>
         <button 
           onClick={onClose}
-          className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg font-bold"
+          className="px-5 py-2 bg-[#D97757] hover:bg-[#C96442] text-white rounded-xl text-xs font-semibold cursor-pointer shadow-xs"
         >
           돌아가기
         </button>
@@ -215,175 +216,168 @@ export const LeaderViewer: React.FC<LeaderViewerProps> = ({ onClose, onOpenLibra
         initial={{ opacity: 0 }} 
         animate={{ opacity: 1 }} 
         exit={{ opacity: 0 }} 
-        className="fixed inset-0 z-[10000] bg-zinc-950 flex flex-col overflow-hidden text-white"
+        className="fixed inset-0 z-[10000] bg-[#FAF9F5] flex flex-col overflow-hidden text-[#2B2927]"
       >
-        {/* 뷰어 컨트롤 바 (오버레이) */}
+        {/* 뷰어 컨트롤 바 */}
         <AnimatePresence>
           {showMenuBar && (
             <motion.div
-              initial={{ y: -100, opacity: 0 }}
+              initial={{ y: -80, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
-              exit={{ y: -100, opacity: 0 }}
+              exit={{ y: -80, opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="absolute top-0 left-0 right-0 p-4 sm:p-5 flex flex-col gap-2.5 z-50 bg-gradient-to-b from-black/95 to-transparent pointer-events-none"
+              className="absolute top-0 left-0 right-0 px-4 py-2.5 z-50 bg-[#FAF9F5]/95 backdrop-blur-md border-b border-[#E5E0D8] shadow-2xs flex items-center justify-between gap-3"
             >
-              {/* 1층: 닫기 버튼 및 우측 조작 제어 버튼 라인 */}
-              <div className="flex items-center justify-between w-full">
-                <div className="pointer-events-auto">
-                  <button 
-                    onClick={onClose}
-                    className="p-2 bg-black/40 hover:bg-black/60 rounded-full backdrop-blur-md transition-colors"
-                  >
-                    <X className="w-6 h-6 text-white" />
-                  </button>
+              {/* 좌측: 닫기 버튼 및 곡 제목 정보 */}
+              <div className="flex items-center gap-3 min-w-0">
+                <button 
+                  onClick={onClose}
+                  className="p-1.5 hover:bg-[#F3EFE9] text-[#6A6864] hover:text-[#2B2927] rounded-lg transition-colors cursor-pointer shrink-0"
+                  title="뷰어 닫기"
+                >
+                  <X className="w-5 h-5 stroke-[1.8px]" />
+                </button>
+                <div className="flex items-baseline gap-2 min-w-0">
+                  <h2 className="font-serif text-sm sm:text-base font-bold text-[#2B2927] tracking-tight truncate">
+                    {currentSong?.title}
+                  </h2>
+                  <span className="text-xs text-[#8C877D] font-medium shrink-0">
+                    ({currentIndex + 1} / {visibleItems.length})
+                  </span>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 sm:gap-3 pointer-events-auto flex-nowrap shrink-0">
+              {/* 우측 도구들 */}
+              <div className="flex items-center gap-2 shrink-0">
                 {onOpenLibrary && (
                   <button
                     onClick={onOpenLibrary}
-                    className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600/80 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all backdrop-blur-md shadow-lg shrink-0"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-[#4A4741] hover:text-[#2B2927] hover:bg-[#F3EFE9] rounded-lg transition-colors cursor-pointer"
                   >
-                    <Library className="w-3.5 h-3.5" />
+                    <Library className="w-3.5 h-3.5 stroke-[1.8px] text-[#6E6A63]" />
                     <span className="hidden sm:inline">저장소</span>
                   </button>
                 )}
 
-                {/* 모바일 PDF 생성 버튼 (인도자용 / 회중용 분리) */}
-                <div className="flex items-center bg-black/40 backdrop-blur-md rounded-xl p-1.5 shadow-lg border border-white/10 group flex-nowrap shrink-0">
-                  {/* 공동체 명칭 입력칸 - 세로 패드나 좁은 화면(md 이하)에서는 레이아웃 깨짐을 방지하고자 가림 */}
-                  <div className="hidden md:flex items-center px-4 gap-3 border-r border-white/10">
-                    <span className="text-[11px] font-black text-indigo-400 uppercase tracking-tight group-focus-within:text-white transition-colors whitespace-nowrap">공동체 명칭 수정 :</span>
+                {/* PDF 생성 버튼 군 */}
+                <div className="flex items-center bg-[#F3EFE9] rounded-lg p-0.5 border border-[#E5E0D8]">
+                  <div className="hidden lg:flex items-center px-2 gap-1.5 border-r border-[#E5E0D8]">
+                    <span className="text-[10px] font-medium text-[#8C877D]">공동체</span>
                     <input 
                       type="text"
                       value={communityName}
                       onChange={(e) => setCommunityName(e.target.value)}
-                      placeholder="공동체 명칭..."
-                      className="bg-transparent border-none text-[12px] font-black text-white focus:outline-none w-24 placeholder:text-white/20"
+                      placeholder="명칭..."
+                      className="bg-transparent border-none text-xs font-semibold text-[#2B2927] focus:outline-none w-20 placeholder:text-[#A8A49C]"
                     />
                   </div>
                   
                   <button
                     onClick={() => handleGeneratePDF('leader')}
                     disabled={isGenerating}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 hover:bg-white/10 text-white/90 rounded-lg text-xs font-bold transition-all whitespace-nowrap shrink-0"
+                    className="flex items-center gap-1 px-2 py-1 hover:bg-[#EBE5DC] text-[#D97757] rounded-md text-xs font-medium transition-colors cursor-pointer"
                     title="멘트가 포함된 인도자용 PDF 생성"
                   >
-                    <FileText className="w-3.5 h-3.5 text-red-400" />
-                    <span className="hidden sm:inline">PDF(인도자)</span>
-                    <span className="inline sm:hidden">인도자</span>
+                    <FileText className="w-3 h-3 stroke-[1.8px]" />
+                    <span>PDF(인도자)</span>
                   </button>
-                  <div className="w-[1px] bg-white/10 mx-1 self-stretch shrink-0" />
                   <button
                     onClick={() => handleGeneratePDF('congregation')}
                     disabled={isGenerating}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 hover:bg-white/10 text-white/90 rounded-lg text-xs font-bold transition-all whitespace-nowrap shrink-0"
+                    className="flex items-center gap-1 px-2 py-1 hover:bg-[#EBE5DC] text-[#4A4741] hover:text-[#2B2927] rounded-md text-xs font-medium transition-colors cursor-pointer"
                     title="악보만 있는 회중용 PDF 생성"
                   >
-                    <Users className="w-3.5 h-3.5 text-emerald-400" />
-                    <span className="hidden sm:inline">PDF(회중)</span>
-                    <span className="inline sm:hidden">회중</span>
+                    <Users className="w-3 h-3 stroke-[1.8px]" />
+                    <span>PDF(회중)</span>
                   </button>
                 </div>
 
                 <button
                   onClick={() => setShowMemo(!showMemo)}
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all backdrop-blur-md shadow-lg shrink-0
-                    ${showMemo 
-                      ? 'bg-amber-500 hover:bg-amber-400 text-white shadow-amber-500/20' 
-                      : 'bg-white/10 hover:bg-white/20 text-white/50'
-                    }`}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                    showMemo 
+                      ? 'bg-[#FAF0EB] text-[#D97757] border border-[#F1D3C6]' 
+                      : 'text-[#6A6864] hover:bg-[#F3EFE9]'
+                  }`}
                 >
-                  <StickyNote className={`w-3.5 h-3.5 ${!showMemo ? 'opacity-50' : ''}`} />
-                  <span className="hidden sm:inline">멘트 {showMemo ? 'ON' : 'OFF'}</span>
-                  <span className="inline sm:hidden">{showMemo ? 'ON' : 'OFF'}</span>
+                  <StickyNote className="w-3.5 h-3.5 stroke-[1.8px]" />
+                  <span>멘트 {showMemo ? 'ON' : 'OFF'}</span>
                 </button>
 
                 {/* 메뉴 숨기기 버튼 */}
                 <button
                   onClick={() => setShowMenuBar(false)}
-                  className="p-2 bg-white/10 hover:bg-white/20 rounded-xl backdrop-blur-md transition-colors shrink-0"
+                  className="p-1.5 text-[#8C877D] hover:text-[#2B2927] hover:bg-[#F3EFE9] rounded-lg transition-colors cursor-pointer"
                   title="메뉴바 숨기기"
                 >
-                  <ChevronUp className="w-5 h-5 text-white" />
+                  <ChevronUp className="w-4 h-4 stroke-[1.8px]" />
                 </button>
-              </div>
-
-              {/* 2층 (한칸 아래): 긴 곡 제목 및 페이지 표시 영역 */}
-              <div className="flex flex-col pl-2 pointer-events-none self-start">
-                <h2 className="text-sm sm:text-base md:text-lg font-black tracking-tight drop-shadow-md text-amber-300">
-                  {currentSong?.title}
-                </h2>
-                <span className="text-[10px] sm:text-xs text-white/70 font-bold leading-none mt-1">
-                  {currentIndex + 1} / {visibleItems.length}
-                </span>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* 메뉴바가 숨겨졌을 때 노출될 귀여운 플로팅 보이기 버튼 */}
+        {/* 메뉴 숨겼을 때 노출되는 플로팅 버튼 */}
         {!showMenuBar && (
           <button
             onClick={() => setShowMenuBar(true)}
-            className="fixed top-4 right-4 z-[10005] p-3 bg-black/60 hover:bg-black/80 text-white rounded-full backdrop-blur-md transition-all active:scale-95 shadow-lg border border-white/5 pointer-events-auto"
+            className="fixed top-3 right-4 z-[10005] p-2 bg-white hover:bg-[#F3EFE9] text-[#2B2927] hover:text-[#D97757] rounded-full transition-all active:scale-95 shadow-md border border-[#E5E0D8] cursor-pointer"
             title="메뉴바 보이기"
           >
-            <ChevronDown className="w-5 h-5" />
+            <ChevronDown className="w-4 h-4 stroke-[1.8px]" />
           </button>
         )}
 
-        {/* 이전/다음 버튼 (오버레이) */}
+        {/* 이전/다음 네비게이션 버튼 */}
         <button 
           onClick={handlePrev}
           disabled={currentIndex === 0}
-          className="absolute left-4 top-1/2 -translate-y-1/2 p-4 z-50 bg-black/20 hover:bg-black/50 disabled:opacity-0 rounded-full backdrop-blur-sm transition-all"
+          className="absolute left-4 top-1/2 -translate-y-1/2 p-2.5 z-50 bg-white/80 hover:bg-white text-[#6A6864] hover:text-[#D97757] disabled:opacity-0 rounded-full border border-[#E5E0D8] shadow-md transition-all cursor-pointer"
+          title="이전 곡"
         >
-          <ChevronLeft className="w-10 h-10 text-white" />
+          <ChevronLeft className="w-6 h-6 stroke-[1.8px]" />
         </button>
 
         <button 
           onClick={handleNext}
           disabled={currentIndex === visibleItems.length - 1}
-          className="absolute right-4 top-1/2 -translate-y-1/2 p-4 z-50 bg-black/20 hover:bg-black/50 disabled:opacity-0 rounded-full backdrop-blur-sm transition-all"
+          className="absolute right-4 top-1/2 -translate-y-1/2 p-2.5 z-50 bg-white/80 hover:bg-white text-[#6A6864] hover:text-[#D97757] disabled:opacity-0 rounded-full border border-[#E5E0D8] shadow-md transition-all cursor-pointer"
+          title="다음 곡"
         >
-          <ChevronRight className="w-10 h-10 text-white" />
+          <ChevronRight className="w-6 h-6 stroke-[1.8px]" />
         </button>
 
-        {/* 메인 뷰어 영역 - overflow-y-auto 및 메뉴 접힘 유무에 따른 패딩 처리 */}
+        {/* 메인 악보 뷰어 영역 */}
         <div 
           className={`flex-1 overflow-y-auto custom-scrollbar w-full flex flex-col items-center min-h-0 relative transition-all duration-300 ${
-            showMenuBar ? 'pt-24 pb-8 px-4 sm:px-12' : 'pt-6 pb-6 px-4 sm:px-12'
+            showMenuBar ? 'pt-16 pb-6 px-4 sm:px-12' : 'pt-6 pb-6 px-4 sm:px-12'
           }`}
         >
           <AnimatePresence mode="wait">
             <motion.div
               key={currentItem.id}
-              initial={{ opacity: 0, scale: 0.98, y: 10 }}
+              initial={{ opacity: 0, scale: 0.99, y: 6 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.98, y: -10 }}
-              transition={{ duration: 0.3 }}
+              exit={{ opacity: 0, scale: 0.99, y: -6 }}
+              transition={{ duration: 0.2 }}
               className="relative flex flex-col items-center justify-start w-full min-h-0"
             >
-              {/* Aspect Ratio Box to contain the cropped image - 가로 기준 핏팅 및 세로 터치 스크롤 연동 */}
               <div 
-                className="relative overflow-hidden bg-white rounded-2xl shadow-2xl ring-1 ring-white/10 flex items-center justify-center shrink-0"
+                className="relative overflow-hidden bg-white rounded-2xl shadow-xl border border-[#E5E0D8] flex items-center justify-center shrink-0"
                 style={{ 
                   aspectRatio: `${finalAspectRatio}`,
                   width: '100%',
-                  maxWidth: '650px', // 패드 세로 및 PC 가로보기 최적 가로 폭 가드
+                  maxWidth: '700px',
                   margin: 'auto'
                 }}
               >
                 {(!blobUrls[currentSong?.id || ''] && (currentSong?.fileId || currentSong?.filePath)?.length > 20 && !(currentSong?.fileId || currentSong?.filePath)?.startsWith('/')) ? (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-900 text-white">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mb-4"></div>
-                    <span className="text-sm font-bold opacity-70">구글 드라이브 원본을 불러오는 중...</span>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#FAF9F5] text-[#2B2927]">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#D97757] mb-2"></div>
+                    <span className="text-xs font-medium text-[#6A6864]">구글 드라이브 원본을 불러오는 중...</span>
                   </div>
                 ) : (
-                  // 하얀 테두리 박스 안쪽에 사방 4% (sm:4% / 모바일 3%) 상당의 온전한 흰 종이 여백 영역 확보!
-                  <div className="absolute inset-3 sm:inset-4 overflow-hidden">
+                  <div className="absolute inset-2.5 sm:inset-3.5 overflow-hidden">
                     <img 
                       src={blobUrls[currentSong?.id || ''] || hymnalApi.resolveImagePath(currentSong?.filePath || currentSong?.filename || '')} 
                       className="absolute block max-w-none top-0 left-0" 
@@ -416,12 +410,12 @@ export const LeaderViewer: React.FC<LeaderViewerProps> = ({ onClose, onOpenLibra
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              className="w-full flex-none border-t border-white/5 bg-black/40 backdrop-blur-md overflow-hidden"
+              className="w-full flex-none border-t border-[#E5E0D8] bg-white shadow-lg overflow-hidden"
             >
-              <div className="w-full max-w-6xl mx-auto px-6 py-8 pb-10">
+              <div className="w-full max-w-5xl mx-auto px-6 py-4">
                 <p 
-                  className="text-amber-300 font-extrabold whitespace-pre-wrap text-center leading-relaxed"
-                  style={{ fontSize: `${Math.max(20, (currentItem.memoFontSize || 12) * 1.5)}px` }}
+                  className="text-[#2B2927] font-serif font-bold whitespace-pre-wrap text-center leading-relaxed"
+                  style={{ fontSize: `${Math.max(16, (currentItem.memoFontSize || 12) * 1.3)}px` }}
                 >
                   {currentItem.memo}
                 </p>
@@ -438,86 +432,87 @@ export const LeaderViewer: React.FC<LeaderViewerProps> = ({ onClose, onOpenLibra
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[11000] bg-black/80 backdrop-blur-xl flex flex-col items-center justify-center p-6 text-center"
+            className="fixed inset-0 z-[11000] bg-[#2B2927]/40 backdrop-blur-xs flex flex-col items-center justify-center p-6 text-center"
           >
-            <div className="relative w-24 h-24 mb-6">
-              <Loader2 className="w-full h-full text-indigo-500 animate-spin opacity-20" />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <Share2 className="w-10 h-10 text-indigo-400 animate-pulse" />
+            <div className="bg-white border border-[#E5E0D8] rounded-3xl p-8 max-w-sm w-full shadow-2xl flex flex-col items-center">
+              <div className="relative w-14 h-14 mb-4">
+                <Loader2 className="w-full h-full text-[#D97757] animate-spin opacity-30" />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <Share2 className="w-6 h-6 text-[#D97757] animate-pulse" />
+                </div>
               </div>
-            </div>
-            
-            <h3 className="text-xl font-black mb-2 tracking-tight">모바일 악보집 생성 중</h3>
-            <p className="text-white/60 text-sm mb-6 leading-relaxed max-w-xs">
-              {genProgress.msg || '잠시만 기다려 주세요...'}
-            </p>
-            
-            {/* 프로그레스 바 */}
-            <div className="w-64 h-2 bg-white/5 rounded-full overflow-hidden mb-2">
-              <motion.div 
-                className="h-full bg-gradient-to-r from-indigo-500 to-emerald-500 shadow-[0_0_10px_rgba(99,102,241,0.5)]"
-                initial={{ width: 0 }}
-                animate={{ width: `${genProgress.percent}%` }}
-                transition={{ duration: 0.3 }}
-              />
-            </div>
-            <span className="text-xs font-black text-indigo-400">
-              {Math.round(genProgress.percent)}%
-            </span>
+              
+              <h3 className="font-serif text-lg font-bold text-[#2B2927] mb-1.5 tracking-tight">모바일 악보집 생성 중</h3>
+              <p className="text-[#6A6864] text-xs mb-4 leading-relaxed">
+                {genProgress.msg || '잠시만 기다려 주세요...'}
+              </p>
+              
+              {/* 프로그레스 바 */}
+              <div className="w-full h-2 bg-[#FAF0EB] rounded-full overflow-hidden mb-2 border border-[#F1D3C6]">
+                <motion.div 
+                  className="h-full bg-[#D97757]"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${genProgress.percent}%` }}
+                  transition={{ duration: 0.3 }}
+                />
+              </div>
+              <span className="text-xs font-semibold text-[#D97757] font-mono">
+                {Math.round(genProgress.percent)}%
+              </span>
 
-            <p className="mt-8 text-xs text-white/30 italic">
-              생성이 완료되면 주소가 클립보드에 자동으로 복사됩니다.
-            </p>
+              <p className="mt-4 text-[11px] text-[#A8A49C]">
+                완료되면 악보 링크가 클립보드에 자동으로 복사됩니다.
+              </p>
 
-            {/* 생성 취소/돌아가기 버튼 */}
-            <button
-              onClick={() => {
-                setIsGenerating(false);
-              }}
-              className="mt-8 px-8 py-3 bg-white/10 hover:bg-red-600 hover:text-white text-white/70 rounded-xl text-xs font-bold transition-all border border-white/5 shadow-lg active:scale-95"
-            >
-              생성 취소하고 이전으로 돌아가기
-            </button>
+              <button
+                onClick={() => setIsGenerating(false)}
+                className="mt-5 px-5 py-2 bg-[#F5F3ED] hover:bg-[#ECEAE4] text-[#6A6864] hover:text-[#2B2927] rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              >
+                취소하기
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* 생성 완료 오버레이 (alert 대신 사용) */}
+      {/* 생성 완료 오버레이 */}
       <AnimatePresence>
         {genResultUrl && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[12000] bg-black/80 backdrop-blur-xl flex flex-col items-center justify-center p-6 text-center"
+            className="fixed inset-0 z-[12000] bg-[#2B2927]/40 backdrop-blur-xs flex flex-col items-center justify-center p-6 text-center"
           >
             <motion.div 
-              initial={{ scale: 0.9, y: 20 }}
+              initial={{ scale: 0.95, y: 16 }}
               animate={{ scale: 1, y: 0 }}
-              className="bg-zinc-900 border border-white/10 rounded-[2.5rem] p-10 max-w-sm w-full shadow-2xl"
+              className="bg-white border border-[#E5E0D8] rounded-3xl p-8 max-w-sm w-full shadow-2xl"
             >
-              <div className="w-20 h-20 bg-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg shadow-emerald-500/20">
-                <Check className="w-10 h-10 text-white" />
+              <div className="w-14 h-14 bg-[#FAF0EB] text-[#D97757] border border-[#F1D3C6] rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-2xs">
+                <Check className="w-7 h-7 stroke-[2px]" />
               </div>
-              <h3 className="text-2xl font-black text-white mb-2">생성 완료!</h3>
-              <p className="text-white/60 text-sm leading-relaxed mb-6">
-                프리미엄 모바일 PDF가 구글 드라이브에 안전하게 저장되었습니다.<br/>
-                <span className="text-emerald-400 font-bold">[{contiTitle || '콘티'}] 링크가 복사되었습니다.</span>
+              <h3 className="font-serif text-lg font-bold text-[#2B2927] mb-1">생성 완료!</h3>
+              <p className="text-[#6A6864] text-xs leading-relaxed mb-5">
+                모바일 PDF가 구글 드라이브에 안전하게 저장되었습니다.<br/>
+                <span className="text-[#D97757] font-semibold">[{contiTitle || '콘티'}] 링크가 복사되었습니다.</span>
               </p>
 
               {/* 링크 주소 표시 영역 */}
-              <div className="bg-black/40 border border-white/5 rounded-xl p-3 mb-8 group relative">
-                <p className="text-[10px] text-white/30 uppercase tracking-widest font-black mb-1 text-left">Drive Link</p>
-                <p className="text-[11px] text-emerald-400/80 font-mono break-all text-left line-clamp-2 leading-tight">
+              <div className="bg-[#FAF9F5] border border-[#E5E0D8] rounded-xl p-3 mb-5 group relative text-left">
+                <p className="text-[10px] text-[#8C877D] uppercase tracking-wider font-semibold mb-1">Drive Link</p>
+                <p className="text-xs text-[#D97757] font-mono break-all line-clamp-2 leading-tight">
                   {genResultUrl}
                 </p>
-                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 rounded-xl cursor-pointer"
-                     onClick={() => {
-                        const shareText = `[${contiTitle || '새 찬양 콘티'}] 악보보기 링크\n${genResultUrl}`;
-                        hymnalApi.writeClipboard(shareText);
-                        alert('안내문과 링크가 다시 복사되었습니다.');
-                     }}>
-                  <span className="text-[10px] text-white font-bold">다시 복사하기</span>
+                <div 
+                  className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-white/95 rounded-xl cursor-pointer border border-[#E5E0D8]"
+                  onClick={() => {
+                    const shareText = `[${contiTitle || '새 찬양 콘티'}] 악보보기 링크\n${genResultUrl}`;
+                    hymnalApi.writeClipboard(shareText);
+                    alert('링크가 다시 복사되었습니다.');
+                  }}
+                >
+                  <span className="text-xs text-[#2B2927] font-semibold">다시 복사하기</span>
                 </div>
               </div>
 
@@ -527,10 +522,10 @@ export const LeaderViewer: React.FC<LeaderViewerProps> = ({ onClose, onOpenLibra
                   onClick={() => {
                     window.open(`https://drive.google.com/uc?export=download&id=${genFileId}`, '_blank');
                   }}
-                  className="w-full mb-4 py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs transition-all active:scale-95 shadow-lg flex items-center justify-center gap-2"
+                  className="w-full mb-2.5 py-2.5 bg-[#FAF0EB] hover:bg-[#FAF0EB]/80 text-[#D97757] border border-[#F1D3C6] rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
                 >
-                  <Download className="w-4 h-4" />
-                  기기에 직접 다운로드
+                  <Download className="w-3.5 h-3.5 stroke-[1.8px]" />
+                  <span>기기에 직접 다운로드</span>
                 </button>
               )}
               
@@ -539,9 +534,9 @@ export const LeaderViewer: React.FC<LeaderViewerProps> = ({ onClose, onOpenLibra
                   setGenResultUrl(null);
                   setIsGenerating(false);
                 }}
-                className="w-full py-4 bg-white text-black rounded-2xl font-black hover:bg-zinc-200 transition-all active:scale-95 shadow-xl"
+                className="w-full py-2.5 bg-[#D97757] hover:bg-[#C96442] text-white rounded-xl text-xs font-semibold transition-colors shadow-2xs cursor-pointer"
               >
-                이전 화면으로 돌아가기
+                닫기
               </button>
             </motion.div>
           </motion.div>

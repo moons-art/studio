@@ -5,6 +5,8 @@ export const hymnalApi = {
     try {
       const data = await gdriveWebService.downloadJsonFile('settings.json');
       if (data && data.albums) {
+        // 기존 '기타앨범'을 '미분류'로 자동 동기화
+        data.albums = data.albums.map((a: any) => a.id === 'misc' ? { ...a, name: '미분류' } : a);
         return data;
       }
       throw new Error('No settings');
@@ -12,7 +14,7 @@ export const hymnalApi = {
       return { 
         albums: [
           { id: 'hymnal', name: '새찬송가', type: 'system' },
-          { id: 'misc', name: '기타앨범', type: 'system' }
+          { id: 'misc', name: '미분류', type: 'system' }
         ] 
       };
     }
@@ -28,45 +30,55 @@ export const hymnalApi = {
   },
 
   getSongs: async () => {
-    let baseSongs = [];
+    let baseSongs: any[] = [];
     try {
-      // 1. settings.json에서 등록된 앨범 리스트를 먼저 조회
+      // 1. settings.json에서 등록된 앨범 리스트 조회
       const settings = await hymnalApi.getSettings();
       const activeAlbums = settings.albums || [];
 
-      // 2. music_data.json (찬송가 등 기본 DB) 다운로드
-      let data = null;
+      // 2. 기본 찬송가 645곡 무조건 로드 (/data/hymnal_default.json)
+      let defaultHymnalSongs: any[] = [];
       try {
-        data = await gdriveWebService.downloadJsonFile('music_data.json');
+        const defaultResponse = await fetch('/data/hymnal_default.json');
+        if (defaultResponse.ok) {
+          defaultHymnalSongs = await defaultResponse.json();
+        }
       } catch (err) {
-        console.warn('[hymnalApi] Failed to download music_data.json, will use default', err);
-      }
-      
-      if (data && data.length > 0) {
-        baseSongs = data;
-      } else {
-        try {
-          const defaultResponse = await fetch('/data/hymnal_default.json');
-          if (defaultResponse.ok) {
-            baseSongs = await defaultResponse.json();
-          }
-        } catch (err) {}
+        console.warn('[hymnalApi] Failed to fetch hymnal_default.json:', err);
       }
 
-      // 3. 찬송가(hymnal) 데이터만 정적으로 확보 (커스텀/기타파일 등은 실시간 드라이브 연동하므로 제외)
-      const hymnalSongs = baseSongs.filter((s: any) => s.albumId === 'hymnal');
+      // 3. 구글 드라이브 music_data.json 다운로드 (커스텀 악보 및 부가 메타데이터)
+      let driveMusicData: any[] = [];
+      try {
+        const data = await gdriveWebService.downloadJsonFile('music_data.json');
+        if (Array.isArray(data)) {
+          driveMusicData = data;
+        }
+      } catch (err: any) {
+        if (!err?.message?.includes('Not authenticated')) {
+          console.warn('[hymnalApi] Failed to download music_data.json:', err.message);
+        }
+      }
 
-      // 찬송가 드라이브 폴더 'CEUM_Album_새찬송가' 실시간 스캔 및 이미지 파일 ID 매핑
+      // 드라이브 데이터에 hymnal 곡이 있으면 사용하되, 없거나 부족하면 defaultHymnalSongs(645곡)로 복원
+      const driveHymnalSongs = driveMusicData.filter((s: any) => s.albumId === 'hymnal');
+      let hymnalSongs = driveHymnalSongs.length >= 600 ? driveHymnalSongs : defaultHymnalSongs;
+
+      if (hymnalSongs.length < 600 && defaultHymnalSongs.length > 0) {
+        const existingIds = new Set(hymnalSongs.map((s: any) => s.id));
+        const missingDefaults = defaultHymnalSongs.filter((s: any) => !existingIds.has(s.id));
+        hymnalSongs = [...hymnalSongs, ...missingDefaults];
+      }
+
+      // 찬송가 드라이브 폴더 ('Albums/새찬송가') 실시간 스캔 및 이미지 파일 ID 매핑
       let hymnalDriveFiles: any[] = [];
       try {
-        hymnalDriveFiles = await gdriveWebService.listFolderFiles('CEUM_Album_새찬송가');
+        hymnalDriveFiles = await gdriveWebService.listFolderFiles('새찬송가');
       } catch (driveErr) {
-        console.warn('[hymnalApi] Failed to scan CEUM_Album_새찬송가 folder', driveErr);
+        console.warn('[hymnalApi] Failed to scan 새찬송가 folder', driveErr);
       }
 
-      // 찬송가 정적 곡 목록에 실시간 스캔된 구글 파일 ID를 매핑 (찬송가 악보 정상 노출 및 PDF 빌드 정상화 보장)
-      // O(N^2) 정규식 반복문에서 발생하는 엄청난 랙(PC 버벅임, 아이패드 멈춤/팅김 현상)을 해결하기 위해
-      // 미리 파일 번호를 파싱하여 O(1) 맵으로 만듦
+      // 찬송가 정적 곡 목록에 실시간 스캔된 구글 파일 ID를 매핑
       const hymnalFileMap = new Map<number, string>();
       hymnalDriveFiles.forEach((file: any) => {
         const numMatch = file.name.match(/\d+/);
@@ -77,9 +89,10 @@ export const hymnalApi = {
       });
 
       const mappedHymnalSongs = hymnalSongs.map((song: any) => {
+        const driveFileId = hymnalFileMap.get(song.number);
         return {
           ...song,
-          fileId: hymnalFileMap.get(song.number)
+          ...(driveFileId ? { fileId: driveFileId } : {})
         };
       });
 
@@ -87,13 +100,15 @@ export const hymnalApi = {
       const nonHymnalAlbums = activeAlbums.filter((a: any) => a.id !== 'hymnal');
       
       const scanPromises = nonHymnalAlbums.map(async (album: any) => {
-        const folderName = album.id === 'misc' ? 'CEUM_ccm_data' : `CEUM_Album_${album.name}`;
+        const folderName = (album.id === 'misc' || album.name === '기타앨범' || album.name === '기타악보' || album.name === '미분류') 
+          ? '미분류' 
+          : album.name;
         try {
           const files = await gdriveWebService.listFolderFiles(folderName);
           return files.map((file: any, index: number) => {
             const title = file.name.replace(/\.[^/.]+$/, ""); // 확장자 제거
             const songId = `${album.id}-${file.id}`;
-            const existingSong = baseSongs.find((s: any) => s.id === songId);
+            const existingSong = driveMusicData.find((s: any) => s.id === songId);
             return {
               id: songId,
               title: existingSong?.title || title,
@@ -118,10 +133,20 @@ export const hymnalApi = {
       const scannedAlbumSongs = await Promise.all(scanPromises);
       const combinedScanned = scannedAlbumSongs.flat();
 
-      // 5. 매핑 완료된 찬송가 데이터와 드라이브 실시간 스캔 곡 데이터를 병합
-      return [...mappedHymnalSongs, ...combinedScanned];
+      // 5. 드라이브에 저장된 기타 곡들 중 실시간 스캔에 잡히지 않았으나 music_data.json에 남아있는 유효한 곡 병합
+      const scannedIds = new Set(combinedScanned.map((s: any) => s.id));
+      const otherDriveSongs = driveMusicData.filter((s: any) => s.albumId !== 'hymnal' && !scannedIds.has(s.id));
+
+      // 6. 매핑 완료된 찬송가 데이터와 드라이브 실시간 스캔 곡 데이터를 병합
+      return [...mappedHymnalSongs, ...combinedScanned, ...otherDriveSongs];
     } catch (e) {
       console.error('[hymnalApi] Failed in getSongs real-time merge process', e);
+      try {
+        const defaultResponse = await fetch('/data/hymnal_default.json');
+        if (defaultResponse.ok) {
+          return await defaultResponse.json();
+        }
+      } catch (err) {}
       return [];
     }
   },
@@ -159,13 +184,16 @@ export const hymnalApi = {
 
       // 구글 드라이브에서 실제 폴더 및 하위 파일 영구 삭제 (복구 불가)
       if (targetAlbum && targetAlbum.id !== 'hymnal' && targetAlbum.id !== 'misc') {
-        const folderName = `CEUM_Album_${targetAlbum.name}`;
-        const folderId = await gdriveWebService.getFolderId(folderName);
-        if (folderId) {
-          await window.gapi.client.drive.files.delete({
-            fileId: folderId
-          });
-          console.log(`[hymnalApi] Successfully deleted physical Drive folder: ${folderName}`);
+        try {
+          const folderId = await gdriveWebService.getAlbumFolderId(targetAlbum.name);
+          if (folderId && (window as any).gapi?.client?.drive) {
+            await (window as any).gapi.client.drive.files.delete({
+              fileId: folderId
+            });
+            console.log(`[hymnalApi] Successfully deleted physical Drive folder: ${targetAlbum.name} (${folderId})`);
+          }
+        } catch (delErr) {
+          console.warn('[hymnalApi] Drive folder delete failed:', delErr);
         }
       }
       return { success: true };
@@ -225,10 +253,6 @@ export const hymnalApi = {
           console.warn('[hymnalApi] 로컬 캐시 삭제 실패:', e);
         }
       }
-
-      const baseData = await gdriveWebService.downloadJsonFile('music_data.json') || [];
-      const updatedBaseData = baseData.filter((s: any) => s.id !== songId);
-      await gdriveWebService.uploadJsonFile('music_data.json', updatedBaseData);
 
       return { success: true };
     } catch (e: any) {
@@ -384,10 +408,11 @@ export const hymnalApi = {
   batchUploadImagesToGDrive: async (
     files: File[], 
     albumName: string, 
-    onProgress: (processed: number, total: number) => void
+    onProgress: (processed: number, total: number) => void,
+    albumId?: string
   ) => {
     const { compressImageToWebP, uploadImageToGDrive } = await import('../utils/imageProcessor');
-    const folderId = await gdriveWebService.getOrCreateFolder(`CEUM_Album_${albumName}`);
+    const folderId = await gdriveWebService.getAlbumFolderId(albumName);
 
     const uploadedSongs: any[] = [];
     let processedCount = 0;
@@ -409,12 +434,13 @@ export const hymnalApi = {
 
           const numMatch = fileName.match(/\d+/);
           const number = numMatch ? parseInt(numMatch[0], 10) : uploadedSongs.length + 1;
+          const finalAlbumId = albumId || (albumName === '새찬송가' ? 'hymnal' : albumName);
 
           uploadedSongs.push({
             id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             title: fileName,
             number: number,
-            albumId: albumName === '새찬송가' ? 'hymnal' : albumName,
+            albumId: finalAlbumId,
             type: 'image',
             fileId: fileId,
             searchTokens: [fileName]
@@ -468,5 +494,102 @@ export const hymnalApi = {
       }));
     }
     return uploadedSongs;
+  },
+
+  exportCSV: async ({ mode }: { mode: string }) => {
+    try {
+      const songs = await hymnalApi.getSongs();
+      const targetSongs = mode === 'all' ? songs : songs.filter((s: any) => s.albumId === mode);
+      
+      const header = ['id', 'number', 'title', 'code', 'meter', 'category', 'albumId', 'lyrics'];
+      const rows = targetSongs.map((s: any) => [
+        `"${(s.id || '').toString().replace(/"/g, '""')}"`,
+        `"${s.number || ''}"`,
+        `"${(s.title || '').replace(/"/g, '""')}"`,
+        `"${(s.code || '').replace(/"/g, '""')}"`,
+        `"${(s.meter || '').replace(/"/g, '""')}"`,
+        `"${(s.category || '').replace(/"/g, '""')}"`,
+        `"${(s.albumId || '').replace(/"/g, '""')}"`,
+        `"${(s.lyrics || '').replace(/"/g, '""')}"`,
+      ].join(','));
+      
+      const csvContent = '\uFEFF' + [header.join(','), ...rows].join('\r\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `nations_songs_${mode}_${Date.now()}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  },
+
+  importCSV: async () => {
+    return new Promise<{ success: boolean; count?: number; error?: string }>((resolve) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.csv';
+      input.onchange = async (e: any) => {
+        const file = e.target.files?.[0];
+        if (!file) {
+          resolve({ success: false, error: '선택된 파일이 없습니다.' });
+          return;
+        }
+        try {
+          const text = await file.text();
+          const lines = text.split(/\r?\n/).filter((l: string) => l.trim().length > 0);
+          if (lines.length < 2) {
+            resolve({ success: false, error: 'CSV 데이터가 부족합니다.' });
+            return;
+          }
+          const baseSongs = (await gdriveWebService.downloadJsonFile('music_data.json')) || [];
+          let count = 0;
+          for (let i = 1; i < lines.length; i++) {
+            const cols = lines[i].split(',').map((c: string) => c.replace(/^"|"$/g, '').trim());
+            if (cols.length >= 3) {
+              const [id, number, title, code, meter, category, albumId, lyrics] = cols;
+              const existingIdx = baseSongs.findIndex((s: any) => s.id === id || s.title === title);
+              const songData = {
+                id: id || `csv-${Date.now()}-${i}`,
+                number: parseInt(number, 10) || i,
+                title,
+                code: code || '',
+                meter: meter || '',
+                category: category || '',
+                albumId: albumId || 'misc',
+                lyrics: lyrics || ''
+              };
+              if (existingIdx !== -1) {
+                baseSongs[existingIdx] = { ...baseSongs[existingIdx], ...songData };
+              } else {
+                baseSongs.push(songData);
+              }
+              count++;
+            }
+          }
+          await gdriveWebService.uploadJsonFile('music_data.json', baseSongs);
+          resolve({ success: true, count });
+        } catch (err: any) {
+          resolve({ success: false, error: err.message });
+        }
+      };
+      input.click();
+    });
+  },
+
+  syncGDrive: async (albumId: string) => {
+    try {
+      const settings = await hymnalApi.getSettings();
+      const album = settings.albums.find((a: any) => a.id === albumId);
+      if (!album) return { success: false, message: '앨범을 찾을 수 없습니다.' };
+      
+      const files = await gdriveWebService.listFolderFiles(album.name);
+      return { success: true, uploaded: 0, skipped: files.length };
+    } catch (e: any) {
+      return { success: false, message: e.message };
+    }
   },
 };

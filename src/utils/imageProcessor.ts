@@ -63,17 +63,22 @@ export const compressImageToWebP = async (file: File | Blob, quality = 0.85): Pr
  * Blob을 구글 드라이브에 직접 업로드합니다.
  */
 export const uploadImageToGDrive = async (blob: Blob, fileName: string, parentFolderId?: string): Promise<string> => {
+  if (!fileName || typeof fileName !== 'string' || !fileName.trim()) {
+    throw new Error('uploadImageToGDrive: fileName cannot be empty');
+  }
+  const cleanFileName = fileName.trim();
+
   const metadata: any = {
-    name: fileName,
+    name: cleanFileName,
     mimeType: 'image/webp',
   };
   
   try {
-    // parentFolderId가 없으면 'CEUM_ccm_data' 폴더를 자동 생성/가져와서 기본 저장소로 사용
-    const targetFolderId = parentFolderId || await gdriveWebService.getOrCreateFolder('CEUM_ccm_data');
+    // parentFolderId가 없으면 Nations Studio/Albums/미분류 폴더 사용
+    const targetFolderId = parentFolderId || await gdriveWebService.getAlbumFolderId('misc');
     metadata.parents = [targetFolderId];
   } catch (e) {
-    console.warn('Failed to get or create default folder, uploading to root drive', e);
+    console.warn('Failed to get or create album folder, uploading to root drive', e);
   }
 
   const form = new FormData();

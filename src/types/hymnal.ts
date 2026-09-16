@@ -9,8 +9,9 @@ export interface HymnalSong {
   code?: string;
   meter?: string;
   youtubeUrl?: string; // Legacy
-  youtubeVideos?: { name: string; url: string; }[];
+  youtubeVideos?: { name: string; url: string; isShared?: boolean }[];
   isManual?: boolean;
+  songForm?: string; // 송폼 (예: Intro - V1 - C - Bridge - Outro)
 }
 
 export interface HymnalState {

@@ -181,6 +181,14 @@ export const HymnalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Load Initial Data
   useEffect(() => {
+    // 찬양팀 공유 모드로 접속한 경우 전체 곡 목록/앨범/드라이브 동기화를 스킵하여 초경량 구동
+    const params = new URLSearchParams(window.location.search);
+    const isTeamShareMode = params.get('mode') === 'team-share' || params.get('view') === 'team';
+    if (isTeamShareMode) {
+      setIsLoading(false);
+      return;
+    }
+
     const init = async () => {
       try {
         await reloadSettings(); // 먼저 앨범 목록 등을 로드
@@ -196,8 +204,10 @@ export const HymnalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             lastContiData = driveLastConti;
             console.log('[HymnalProvider] Synced last conti status from Google Drive.');
           }
-        } catch (driveErr) {
-          console.warn('[HymnalProvider] Failed to fetch last conti from GDrive', driveErr);
+        } catch (driveErr: any) {
+          if (!driveErr?.message?.includes('Not authenticated')) {
+            console.warn('[HymnalProvider] Failed to fetch last conti from GDrive', driveErr.message);
+          }
         }
 
         // 2. 드라이브 백업이 없다면 로컬 스토리지 데이터 백업 사용
@@ -518,10 +528,13 @@ export const HymnalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const target = albums.find(a => a.id === albumId);
         alert(`[${target?.name || '앨범'}] 동기화 완료!\n업로드: ${result.uploaded}, 건너뜀: ${result.skipped}`);
         await fetchSongs();
-      } else if (result.message === 'Need Auth') {
-        const url = await hymnalApi.getAuthUrl();
-        hymnalApi.openExternal(url);
-        alert('구글 인증이 필요합니다. 웹 브라우저에서 인증 후 다시 시도해 주세요.');
+      } else if (result.message === 'Need Auth' || result.message?.includes('authenticated')) {
+        const loginSuccess = await gdriveWebService.login();
+        if (loginSuccess) {
+          alert('구글 드라이브 인증이 완료되었습니다. 다시 동기화를 시도해 주세요.');
+        } else {
+          alert('구글 드라이브 인증이 필요합니다.');
+        }
       }
     } finally {
       stopListening();

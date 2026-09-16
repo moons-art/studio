@@ -10,7 +10,10 @@ import {
   Settings,
   HelpCircle,
   FolderPlus,
-  Trash2
+  Trash2,
+  Check,
+  MoreVertical,
+  Plus
 } from 'lucide-react';
 import { hymnalApi } from '../../api/hymnalApi';
 import { logActivity } from '../../utils/logger';
@@ -34,7 +37,9 @@ export const HymnalSidebar: React.FC = () => {
     setIsSyncing,
     fetchSongs,
     deleteAlbum,
-    updateAlbum
+    updateAlbum,
+    showAllTooltips,
+    setShowAllTooltips
   } = useHymnal();
 
   useEffect(() => {
@@ -81,7 +86,7 @@ export const HymnalSidebar: React.FC = () => {
       // 신규 추가된 파일들만 선별하여 구글 드라이브 업로드 수행 (데이터베이스 json 수정 안함)
       const newSongs = await hymnalApi.batchUploadImagesToGDrive(filesToUpload, albumName, (processed, total) => {
         setUploadProgress({ processed, total });
-      });
+      }, albumId);
 
       // 3. 앨범 목록 업데이트
       if (!albums.find(a => a.id === albumId)) {
@@ -124,7 +129,7 @@ export const HymnalSidebar: React.FC = () => {
       const files = await hymnalApi.selectMultipleFiles();
       if (!files || files.length === 0) return;
 
-      // 1. 이미 등록된 곡(기타앨범) 목록을 대조하여 중복 업로드 필터링
+      // 1. 이미 등록된 곡(미분류) 목록을 대조하여 중복 업로드 필터링
       const miscSongs = songs.filter(s => s.albumId === 'misc');
       const existingTitles = new Set(miscSongs.map(s => s.title));
 
@@ -136,20 +141,20 @@ export const HymnalSidebar: React.FC = () => {
       });
 
       if (filesToUpload.length === 0) {
-        alert('선택한 모든 파일이 이미 기타앨범에 등록되어 있어 업로드를 건너뜁니다.');
+        alert('선택한 모든 파일이 이미 미분류에 등록되어 있어 업로드를 건너뜁니다.');
         return;
       }
 
       setIsSyncing(true);
       
-      // 2. 신규 악보만 구글 드라이브에 업로드 (CEUM_ccm_data 폴더에 저장됨)
+      // 2. 신규 악보만 구글 드라이브에 업로드 (Albums/미분류 폴더에 저장됨)
       const newSongs = await hymnalApi.uploadSingleImagesToGDrive(filesToUpload, (processed, total) => {
         // progress callback
       });
 
-      // 3. 앨범 목록 연동 (기타앨범 카테고리 1회 활성화)
+      // 3. 앨범 목록 연동 (미분류 카테고리 1회 활성화)
       if (!albums.find(a => a.id === 'misc')) {
-        const newAlbums = [...albums, { id: 'misc', name: '기타앨범' }];
+        const newAlbums = [...albums, { id: 'misc', name: '미분류' }];
         setAlbums(newAlbums);
         const { gdriveWebService } = await import('../../api/gdriveWebService');
         await gdriveWebService.uploadJsonFile('settings.json', { albums: newAlbums });
@@ -165,7 +170,7 @@ export const HymnalSidebar: React.FC = () => {
       }
 
       alert(`${filesToUpload.length}개의 신규 파일 업로드가 완료되었습니다! (중복 ${files.length - filesToUpload.length}개 건너뜀)`);
-      logActivity('악보 추가', `기타앨범 낱개 악보 추가: ${filesToUpload.length}곡`);
+      logActivity('악보 추가', `미분류 낱개 악보 추가: ${filesToUpload.length}곡`);
       
       // 5. 완벽한 백그라운드 동기화는 약간의 지연 후 실행
       setTimeout(() => fetchSongs(), 3000);
@@ -178,126 +183,175 @@ export const HymnalSidebar: React.FC = () => {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-4">
       {/* 앨범 목록 섹션 */}
       <div>
-        <div className="mb-2 px-2 space-y-1">
-          <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">앨범 목록</h2>
+        <div className="text-[11px] font-medium text-[#8C877D] px-1 mb-1.5 flex items-center justify-between">
+          <span>앨범목록</span>
+          <span className="text-[10px] text-[#8C877D]">{albums.filter(a => a.id !== 'hymnal' && a.id !== 'misc').length + 3}</span>
         </div>
         
-        <div className="space-y-2">
+        <div className="space-y-0.5">
+          {/* 앨범 버튼 (+글자 삭제, 아이콘 유지) - 모바일 숨김 */}
           <button 
-            onClick={() => setActiveAlbumId('all')}
-            className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${
-              activeAlbumId === 'all' 
-                ? 'bg-slate-800 text-white shadow-lg border border-slate-800' 
-                : 'bg-white border border-slate-200 shadow-sm hover:border-slate-300 text-slate-600 hover:bg-slate-50'
-            }`}
+            onClick={() => handleAlbumUpload(false)}
+            disabled={isSyncing}
+            className="w-full hidden md:flex items-center gap-2 px-2.5 py-2 mb-1 rounded-xl text-xs font-normal text-[#4A4741] hover:bg-[#F3EFE9] transition-all group disabled:opacity-50 cursor-pointer"
           >
-            <Music className="w-4 h-4 shrink-0" />
-            <span className="text-sm font-bold flex-1 text-left truncate">전체곡 모음</span>
+            <Plus className="w-4 h-4 text-[#6E6A63] stroke-[1.8px]" />
+            <span className="flex-1 text-left font-medium">앨범</span>
+            <TooltipIcon text="새로운 폴더를 통째로 업로드하여 새 앨범을 만듭니다." />
           </button>
 
-          {albums.map((album) => (
+          {/* 전체 */}
+          <div 
+            onClick={() => setActiveAlbumId('all')}
+            className={`
+              group relative flex items-center gap-2 px-2.5 py-2 rounded-xl cursor-pointer transition-all duration-150
+              ${activeAlbumId === 'all' 
+                ? 'bg-[#EBE5DC] text-[#2B2927] font-medium' 
+                : 'hover:bg-[#F3EFE9] text-[#4A4741]'}
+            `}
+          >
+            <div className={`
+              w-4 h-4 shrink-0 rounded-full border flex items-center justify-center transition-colors
+              ${activeAlbumId === 'all' ? 'bg-[#524E48] border-[#524E48]' : 'border-[#C2BBB0] bg-white'}
+            `}>
+              {activeAlbumId === 'all' && <Check className="w-2.5 h-2.5 text-white stroke-[3px]" />}
+            </div>
+            <span className="flex-1 text-xs tracking-tight truncate leading-tight">전체</span>
+          </div>
+
+          {/* 새찬송가 */}
+          <div 
+            onClick={() => setActiveAlbumId('hymnal')}
+            className={`
+              group relative flex items-center gap-2 px-2.5 py-2 rounded-xl cursor-pointer transition-all duration-150
+              ${activeAlbumId === 'hymnal' 
+                ? 'bg-[#EBE5DC] text-[#2B2927] font-medium' 
+                : 'hover:bg-[#F3EFE9] text-[#4A4741]'}
+            `}
+          >
+            <div className={`
+              w-4 h-4 shrink-0 rounded-full border flex items-center justify-center transition-colors
+              ${activeAlbumId === 'hymnal' ? 'bg-[#524E48] border-[#524E48]' : 'border-[#C2BBB0] bg-white'}
+            `}>
+              {activeAlbumId === 'hymnal' && <Check className="w-2.5 h-2.5 text-white stroke-[3px]" />}
+            </div>
+            <span className="flex-1 text-xs tracking-tight truncate leading-tight">새찬송가</span>
+          </div>
+
+          {/* 미분류 */}
+          <div 
+            onClick={() => setActiveAlbumId('misc')}
+            className={`
+              group relative flex items-center gap-2 px-2.5 py-2 rounded-xl cursor-pointer transition-all duration-150
+              ${activeAlbumId === 'misc' 
+                ? 'bg-[#EBE5DC] text-[#2B2927] font-medium' 
+                : 'hover:bg-[#F3EFE9] text-[#4A4741]'}
+            `}
+          >
+            <div className={`
+              w-4 h-4 shrink-0 rounded-full border flex items-center justify-center transition-colors
+              ${activeAlbumId === 'misc' ? 'bg-[#524E48] border-[#524E48]' : 'border-[#C2BBB0] bg-white'}
+            `}>
+              {activeAlbumId === 'misc' && <Check className="w-2.5 h-2.5 text-white stroke-[3px]" />}
+            </div>
+            <span className="flex-1 text-xs tracking-tight truncate leading-tight">미분류</span>
+          </div>
+
+          {/* 그 외 개별 커스텀 앨범 목록 */}
+          {albums.filter(album => album.id !== 'hymnal' && album.id !== 'misc').map((album) => (
             <div 
               key={album.id}
               onClick={() => setActiveAlbumId(album.id)}
-              className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all cursor-pointer ${
-                activeAlbumId === album.id 
-                  ? 'bg-red-500 text-white shadow-lg shadow-red-100 border border-red-500' 
-                  : 'bg-white border border-slate-200 shadow-sm hover:border-slate-300 text-slate-600 hover:bg-slate-50'
-              }`}
+              className={`
+                group relative flex items-center gap-2 px-2.5 py-2 rounded-xl cursor-pointer transition-all duration-150
+                ${activeAlbumId === album.id 
+                  ? 'bg-[#EBE5DC] text-[#2B2927] font-medium' 
+                  : 'hover:bg-[#F3EFE9] text-[#4A4741]'}
+              `}
             >
-              <div className={`w-2 h-2 rounded-full shrink-0 ${activeAlbumId === album.id ? 'bg-white' : 'bg-red-400'}`} />
-              <span className="text-sm font-bold flex-1 text-left truncate">{album.id === 'misc' ? '기타앨범' : album.name}</span>
-              {activeAlbumId === album.id && album.id !== 'hymnal' && album.id !== 'misc' && (
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setEditingAlbum(album);
-                    setShowAlbumModal(true);
-                  }}
-                  className="p-1.5 hover:bg-red-400 rounded-lg text-white transition-all shrink-0"
-                >
-                  <Settings className="w-4 h-4" />
-                </button>
-              )}
+              <div className={`
+                w-4 h-4 shrink-0 rounded-full border flex items-center justify-center transition-colors
+                ${activeAlbumId === album.id ? 'bg-[#524E48] border-[#524E48]' : 'border-[#C2BBB0] bg-white'}
+              `}>
+                {activeAlbumId === album.id && <Check className="w-2.5 h-2.5 text-white stroke-[3px]" />}
+              </div>
+              
+              <span className="flex-1 text-xs tracking-tight truncate leading-tight">
+                {album.name}
+              </span>
+
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setEditingAlbum(album);
+                  setShowAlbumModal(true);
+                }}
+                className="p-1 text-[#8C877D] hover:text-[#2B2927] hover:bg-[#DED8CE]/60 rounded-md transition-all opacity-0 group-hover:opacity-100 shrink-0 cursor-pointer"
+                title="앨범 설정"
+              >
+                <MoreVertical className="w-3.5 h-3.5 stroke-[1.8px]" />
+              </button>
             </div>
           ))}
         </div>
       </div>
 
-      {/* 업로드 도구 섹션 */}
-      <div className="space-y-6">
-        {/* 가이드 문구 */}
-        <div className="space-y-1.5 p-3 bg-slate-50 border border-slate-100 rounded-xl">
-          <div className="flex items-center text-[11px] font-bold text-slate-600">
-            + 악보 삭제
-            <TooltipIcon text="우측 악보 화면에서 상세편집 버튼을 눌러 개별 악보를 지울 수 있습니다." />
-          </div>
+      {/* 악보추가 섹션 */}
+      <div className="pt-2 border-t border-[#F0EBE1]">
+        <div className="text-[11px] font-medium text-[#8C877D] px-1 mb-1.5">
+          악보추가
         </div>
 
-        {/* PC용 업로드 */}
-        <div className="space-y-2">
-          <h2 className="text-[11px] font-bold text-indigo-400 uppercase px-2 mb-2 flex items-center">
-            PC용 (폴더 업로드)
-          </h2>
-          <button 
-            onClick={() => handleAlbumUpload(false)}
-            disabled={isSyncing}
-            className="w-full p-4 rounded-2xl bg-indigo-50 border border-indigo-100 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-200 transition-all flex flex-col items-center gap-2 group shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <FolderUp className="w-5 h-5 group-hover:-translate-y-1 transition-transform" />
-            <div className="flex items-center">
-              <span className="text-xs font-bold">{isSyncing ? '업로드 준비 중...' : '새앨범 추가'}</span>
-              <TooltipIcon text="새로운 폴더를 통째로 업로드하여 새 앨범을 만듭니다. 앱이 폴더명(앨범명)을 물어보며, 악보를 자동으로 불러옵니다." />
-            </div>
-          </button>
-          
-          <button 
-            onClick={() => handleAlbumUpload(true)}
-            disabled={isSyncing}
-            className="w-full p-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100 transition-all flex flex-col items-center justify-center gap-1.5 group disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <UploadCloud className="w-4 h-4 text-slate-500" />
-            <div className="flex items-center text-center">
-              <span className="text-[10px] font-bold leading-tight tracking-tighter whitespace-nowrap">찬송가 악보<br/>업로드 (최초 1회)</span>
-              <TooltipIcon text="용량관계로 찬송가의 목록만 빌드되어 있으니, 사용자가 악보를 업로드 해주셔야 합니다" />
-            </div>
-          </button>
-        </div>
-
-        {/* PC/모바일용 업로드 */}
-        <div className="space-y-2">
-          <h2 className="text-[11px] font-bold text-emerald-500 uppercase px-2 mb-2">PC + 모바일용</h2>
+        <div className="space-y-0.5">
+          {/* 앨범에 추가 */}
           <button 
             onClick={handleSingleFileUpload}
             disabled={isSyncing}
-            className="w-full p-4 rounded-2xl bg-emerald-50 border border-emerald-100 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-200 transition-all flex flex-col items-center gap-2 group shadow-sm disabled:opacity-50 disabled:cursor-not-allowed relative"
+            className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-normal text-[#4A4741] hover:bg-[#F3EFE9] transition-all group disabled:opacity-50 cursor-pointer"
           >
-            <FilePlus className="w-5 h-5 group-hover:-translate-y-1 transition-transform" />
-            <div className="flex flex-col items-center">
-              <span className="text-xs font-black text-slate-700 leading-tight tracking-tight whitespace-nowrap">낱개악보 추가</span>
-            </div>
-            <TooltipIcon text="기기 내부 파일을 선택해 악보를 추가 하는 기능입니다. 앱의 [기타앨범]에 악보가 추가됩니다." position="top-right" />
+            <FilePlus className="w-4 h-4 text-[#6E6A63] stroke-[1.8px]" />
+            <span className="flex-1 text-left">앨범에 추가</span>
+            <TooltipIcon text="기기 내부 악보 파일을 선택해 앨범에 추가합니다." />
           </button>
+
+          {/* 찬송가 추가 - 모바일 숨김 */}
+          <button 
+            onClick={() => handleAlbumUpload(true)}
+            disabled={isSyncing}
+            className="w-full hidden md:flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-normal text-[#4A4741] hover:bg-[#F3EFE9] transition-all group disabled:opacity-50 cursor-pointer"
+          >
+            <UploadCloud className="w-4 h-4 text-[#6E6A63] stroke-[1.8px]" />
+            <span className="flex-1 text-left">찬송가 추가</span>
+            <TooltipIcon text="찬송가 악보 폴더를 선택하여 업로드합니다 (최초 1회)" />
+          </button>
+        </div>
+
+        {/* 악보 삭제 안내 - 모바일 숨김 */}
+        <div className="pt-1.5 hidden md:block">
+          <div className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs font-normal text-[#8C877D] bg-[#F3EFE9]/50 border border-[#E8E2D9]">
+            <span className="flex-1 text-left text-[#D97757] font-medium">+ 악보 삭제 안내</span>
+            <TooltipIcon text="우측 악보 화면에서 상세편집 버튼을 눌러 개별 악보를 지울 수 있습니다." />
+          </div>
         </div>
       </div>
 
       {/* 진행률 표시기 */}
       {uploadProgress && (
-        <div className="mt-4 p-4 bg-slate-800 text-white rounded-2xl shadow-xl border border-slate-700 animate-in fade-in slide-in-from-bottom-4">
-          <div className="flex justify-between items-center mb-2">
-            <span className="text-xs font-bold">업로드 진행률</span>
-            <span className="text-xs font-black text-indigo-400">{Math.round((uploadProgress.processed / uploadProgress.total) * 100)}%</span>
+        <div className="p-3 bg-[#2C2B29] text-white rounded-xl shadow-lg border border-[#4A4844] animate-in fade-in slide-in-from-bottom-2">
+          <div className="flex justify-between items-center mb-1.5">
+            <span className="text-xs font-medium text-[#FAF9F5]">업로드 진행 중</span>
+            <span className="text-xs font-bold text-[#EBE5DC]">{Math.round((uploadProgress.processed / uploadProgress.total) * 100)}%</span>
           </div>
-          <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
+          <div className="w-full h-1.5 bg-[#4A4844] rounded-full overflow-hidden">
             <div 
-              className="h-full bg-indigo-500 transition-all duration-300"
+              className="h-full bg-[#D97757] transition-all duration-300"
               style={{ width: `${(uploadProgress.processed / uploadProgress.total) * 100}%` }}
             />
           </div>
-          <p className="text-[10px] text-slate-400 mt-2 text-center">
+          <p className="text-[10px] text-[#A3A19B] mt-1.5 text-center">
             {uploadProgress.processed} / {uploadProgress.total} 개 완료
           </p>
         </div>
@@ -311,29 +365,35 @@ export const HymnalSidebar: React.FC = () => {
               <motion.div 
                 initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                 onClick={() => setShowAlbumModal(false)}
-                className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" 
+                className="absolute inset-0 bg-[#2B2927]/40 backdrop-blur-xs" 
               />
               <motion.div 
-                initial={{ scale: 0.9, opacity: 0, y: 10 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0, y: 10 }}
-                className="relative w-full max-w-sm bg-white rounded-[2rem] shadow-2xl overflow-hidden border border-slate-100"
+                initial={{ scale: 0.96, opacity: 0, y: 8 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.96, opacity: 0, y: 8 }}
+                className="relative w-full max-w-sm bg-[#FBF9F7] rounded-2xl shadow-xl overflow-hidden border border-[#EBE6DF]"
               >
                 {/* Header */}
-                <div className="px-6 py-5 border-b border-slate-100 bg-slate-50/50">
-                  <h3 className="text-lg font-extrabold text-slate-800 tracking-tight">
+                <div className="px-5 py-4 border-b border-[#F0EBE1] bg-[#F8F6F1] flex items-center justify-between">
+                  <h3 className="font-serif text-base font-bold text-[#2B2927]">
                     앨범 설정
                   </h3>
+                  <button 
+                    onClick={() => setShowAlbumModal(false)}
+                    className="p-1 hover:bg-[#ECE7DF] rounded-lg text-[#8C877D] hover:text-[#2B2927] cursor-pointer transition-colors"
+                  >
+                    <Settings className="w-4 h-4 stroke-[1.5px]" />
+                  </button>
                 </div>
                 
-                <div className="p-6 space-y-6">
+                <div className="p-5 space-y-4">
                   {/* 앨범 이름 수정 */}
-                  <div className="space-y-2">
-                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">앨범 이름 수정</label>
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-medium text-[#8C877D] uppercase tracking-wider">앨범 이름 수정</label>
                     <div className="flex gap-2">
                       <input 
                         type="text"
                         value={albumNameInput}
                         onChange={(e) => setAlbumNameInput(e.target.value)}
-                        className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all min-w-0"
+                        className="flex-1 px-3 py-2 bg-white border border-[#E5E0D8] rounded-xl text-xs font-normal text-[#2B2927] focus:outline-none focus:border-[#524E48] transition-all min-w-0"
                       />
                       <button 
                         onClick={async () => {
@@ -349,31 +409,31 @@ export const HymnalSidebar: React.FC = () => {
                             setShowAlbumModal(false);
                           }
                         }}
-                        className="px-4 py-3 bg-slate-800 text-white rounded-xl text-sm font-bold hover:bg-slate-700 transition-all active:scale-95 whitespace-nowrap shadow-sm shrink-0"
+                        className="px-4 py-2 bg-[#524E48] text-white rounded-xl text-xs font-medium hover:bg-[#3D3A36] transition-all whitespace-nowrap cursor-pointer shadow-2xs"
                       >
                         저장
                       </button>
                     </div>
                   </div>
 
-                  <div className="h-px bg-slate-100 w-full" />
+                  <div className="h-px bg-[#F0EBE1] w-full" />
 
                   {/* 메뉴 버튼들 */}
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     <button 
                       onClick={() => {
                         alert('빈 폴더에 추가 하고 싶은 악보들을 넣고 업로드 버튼을 누르세요');
                         handleAlbumUpload(false, editingAlbum);
                         setShowAlbumModal(false);
                       }}
-                      className="w-full flex items-center gap-3 p-4 bg-indigo-50/50 hover:bg-indigo-50 border border-indigo-100/50 hover:border-indigo-200 text-indigo-700 rounded-2xl transition-all group text-left shadow-sm"
+                      className="w-full flex items-center gap-3 p-3 bg-white hover:bg-[#F3EFE9] border border-[#E5E0D8] text-[#4A4741] rounded-xl transition-all group text-left cursor-pointer"
                     >
-                      <div className="w-10 h-10 shrink-0 rounded-xl bg-indigo-100 flex items-center justify-center group-hover:scale-105 group-active:scale-95 transition-transform">
-                        <FolderPlus className="w-5 h-5 text-indigo-600" />
+                      <div className="w-8 h-8 shrink-0 rounded-lg bg-[#FAF0EB] border border-[#F1D3C6] flex items-center justify-center">
+                        <FolderPlus className="w-4 h-4 text-[#D97757] stroke-[1.8px]" />
                       </div>
                       <div className="flex flex-col flex-1 min-w-0">
-                        <span className="text-sm font-bold">기존 앨범에 악보 추가</span>
-                        <span className="text-[11px] font-medium text-indigo-500 truncate mt-0.5">이 앨범에 새 악보들을 병합합니다</span>
+                        <span className="text-xs font-medium text-[#2B2927]">기존 앨범에 악보 추가</span>
+                        <span className="text-[10px] text-[#8C877D] truncate">이 앨범에 새 악보들을 병합합니다</span>
                       </div>
                     </button>
                     
@@ -384,14 +444,14 @@ export const HymnalSidebar: React.FC = () => {
                           setShowAlbumModal(false);
                         }
                       }}
-                      className="w-full flex items-center gap-3 p-4 bg-red-50/50 hover:bg-red-50 border border-red-100/50 hover:border-red-200 text-red-600 rounded-2xl transition-all group text-left shadow-sm"
+                      className="w-full flex items-center gap-3 p-3 bg-[#F7EEE9] hover:bg-[#F2DFD5] border border-[#F0DCD3] text-[#D97757] rounded-xl transition-all group text-left cursor-pointer"
                     >
-                      <div className="w-10 h-10 shrink-0 rounded-xl bg-red-100 flex items-center justify-center group-hover:scale-105 group-active:scale-95 transition-transform">
-                        <Trash2 className="w-5 h-5 text-red-600" />
+                      <div className="w-8 h-8 shrink-0 rounded-lg bg-white border border-[#F0DCD3] flex items-center justify-center">
+                        <Trash2 className="w-4 h-4 text-[#D97757] stroke-[1.8px]" />
                       </div>
                       <div className="flex flex-col flex-1 min-w-0">
-                        <span className="text-sm font-bold">앨범 삭제하기</span>
-                        <span className="text-[11px] font-medium text-red-400 truncate mt-0.5">이 앨범과 모든 악보를 삭제합니다</span>
+                        <span className="text-xs font-medium text-[#D97757]">앨범 삭제하기</span>
+                        <span className="text-[10px] text-[#D97757]/80 truncate">이 앨범과 모든 악보를 삭제합니다</span>
                       </div>
                     </button>
                   </div>

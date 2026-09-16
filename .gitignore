@@ -19,6 +19,7 @@ release
 .env.*
 scratch/
 .gemini/
+.firebase/
 
 # Editor directories and files
 .vscode/*

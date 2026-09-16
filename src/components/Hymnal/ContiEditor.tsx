@@ -27,7 +27,7 @@ const SmoothSlider = memo(({
   max, 
   step = 1,
   label,
-  accentColor = "accent-indigo-500",
+  accentColor = "accent-[#D97757]",
   unit = ""
 }: {
   value: number;
@@ -43,8 +43,8 @@ const SmoothSlider = memo(({
   useEffect(() => { setLocalVal(value); }, [value]);
 
   return (
-    <div className="flex items-center gap-2">
-      {label && <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">{label}</span>}
+    <div className="flex items-center gap-1.5">
+      {label && <span className="text-[9px] font-medium text-[#8C877D] tracking-wide whitespace-nowrap">{label}</span>}
       <input 
         type="range" min={min} max={max} step={step} 
         value={localVal} 
@@ -52,13 +52,11 @@ const SmoothSlider = memo(({
         onChange={(e) => {
           const v = Number(e.target.value);
           setLocalVal(v);
-          // 실시간 반영을 위해 Store 업데이트를 호출하되, 
-          // DraggableContiItem이 memo되어 있어 부하가 적음
           onChange(v);
         }} 
         className={`w-14 sm:w-16 ${accentColor} h-1 cursor-pointer`} 
       />
-      <span className={`text-[10px] font-black font-mono w-6 text-center ${accentColor.replace('accent-', 'text-').replace('-500', '-300')}`}>
+      <span className="text-[11px] font-semibold text-[#D97757] w-6 text-center font-mono">
         {localVal}{unit}
       </span>
     </div>
@@ -148,59 +146,65 @@ const DraggableContiItem = React.memo(({
     >
        {isSelected && !isPreviewMode && (
          <div 
-           className="absolute -top-11 left-0 flex items-center gap-2.5 bg-slate-900/95 backdrop-blur-md text-white px-2.5 py-1.5 rounded-xl shadow-2xl z-[110] no-print border border-white/10 animate-in fade-in slide-in-from-bottom-1 duration-200"
+           className="absolute -top-9 left-0 flex items-center gap-1.5 bg-[#FAF9F5] text-[#2B2927] px-2 py-1 rounded-xl shadow-md z-[110] no-print border border-[#E5E0D8] animate-in fade-in slide-in-from-bottom-1 duration-200"
            onMouseDown={(e) => e.stopPropagation()}
            onClick={(e) => e.stopPropagation()}
          >
-            <button onClick={() => onCropEdit(item.id)} className="flex items-center gap-1.5 px-3 py-1 bg-indigo-600 hover:bg-indigo-500 transition-all rounded-lg shadow-lg shadow-indigo-500/20 group whitespace-nowrap">
+            {/* 자르기 - 데스크톱 전용 */}
+            <button onClick={() => onCropEdit(item.id)} className="hidden md:flex items-center gap-1.5 px-2.5 py-1 bg-[#D97757] hover:bg-[#C96442] text-white transition-all rounded-lg shadow-2xs group whitespace-nowrap cursor-pointer">
               <Scissors className="w-3 h-3 text-white/90 group-hover:scale-110 transition-transform" />
-              <span className="text-[10px] font-black tracking-tight">자르기</span>
+              <span className="text-[11px] font-medium tracking-tight">자르기</span>
             </button>
             
-            <div className="w-px h-3 bg-white/20 mx-0.5" />
+            <div className="hidden md:block w-px h-3.5 bg-[#E5E0D8] mx-0.5" />
             
-            <div className="flex items-center gap-3">
+            {/* 메모 - 데스크톱 전용 */}
+            <div className="hidden md:flex items-center gap-2">
               <button 
                 onClick={() => onUpdate(item.id, { isMemoOpen: !item.isMemoOpen })} 
-                className={`flex items-center gap-1.5 px-2.5 py-1 transition-all rounded-lg border border-white/5 ${item.isMemoOpen ? 'bg-amber-500 text-white shadow-amber-500/20' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+                className={`flex items-center gap-1.5 px-2.5 py-1 transition-all rounded-lg text-xs font-medium cursor-pointer ${item.isMemoOpen ? 'bg-[#FAF0EB] text-[#D97757] border border-[#F1D3C6]' : 'text-[#6A6864] hover:bg-[#F3EFE9]'}`}
               >
                 <StickyNote className="w-3 h-3" />
-                <span className="text-[10px] font-black tracking-tight">메모</span>
+                <span className="text-[11px] font-medium tracking-tight">메모</span>
               </button>
 
               {item.isMemoOpen && (
                 <SmoothSlider 
-                  label="Font" 
+                  label="크기" 
                   min={10} max={60} 
                   value={item.memoFontSize || 12} 
                   onChange={(v) => onUpdate(item.id, { memoFontSize: v })}
-                  accentColor="accent-amber-400"
+                  accentColor="accent-[#D97757]"
                 />
               )}
             </div>
 
-            <div className="w-px h-3 bg-white/20 mx-0.5" />
+            <div className="hidden md:block w-px h-3.5 bg-[#E5E0D8] mx-0.5" />
             
-            <div className="flex items-center gap-2">
-                <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">크기</span>
-                <div className="flex items-center gap-1 bg-white/5 p-0.5 rounded-lg border border-white/5">
-                   <button onMouseDown={(e) => e.stopPropagation()} onClick={() => onUpdate(item.id, { width: Math.round(Math.max(10, item.width - 2)) })} className="p-1 hover:bg-white/10 rounded-md text-slate-400 hover:text-white transition-all">
+            {/* 크기 조절기 - 모바일/데스크톱 공통 */}
+            <div className="flex items-center gap-1">
+                <span className="text-[9px] font-medium text-[#8C877D] hidden sm:inline">크기</span>
+                <div className="flex items-center gap-0.5 bg-[#F3EFE9] p-0.5 rounded-lg border border-[#E5E0D8]">
+                   <button onMouseDown={(e) => e.stopPropagation()} onClick={() => onUpdate(item.id, { width: Math.round(Math.max(10, item.width - 2)) })} className="p-1 hover:bg-[#EBE5DC] rounded text-[#6A6864] hover:text-[#2B2927] transition-all cursor-pointer">
                      <Minus className="w-3 h-3" />
                    </button>
-                   <span className="text-[9px] font-black font-mono text-indigo-300 w-7 text-center">{Math.round(item.width)}%</span>
-                   <button onMouseDown={(e) => e.stopPropagation()} onClick={() => onUpdate(item.id, { width: Math.round(Math.min(100, item.width + 2)) })} className="p-1 hover:bg-white/10 rounded-md text-slate-400 hover:text-white transition-all">
+                   <span className="text-[10px] font-semibold font-mono text-[#D97757] w-7 text-center">{Math.round(item.width)}%</span>
+                   <button onMouseDown={(e) => e.stopPropagation()} onClick={() => onUpdate(item.id, { width: Math.round(Math.min(100, item.width + 2)) })} className="p-1 hover:bg-[#EBE5DC] rounded text-[#6A6864] hover:text-[#2B2927] transition-all cursor-pointer">
                      <Plus className="w-3 h-3" />
                    </button>
                 </div>
             </div>
             
-            <div className="w-px h-3 bg-white/20 mx-0.5" />
+            <div className="hidden md:block w-px h-3.5 bg-[#E5E0D8] mx-0.5" />
             
-            <button onClick={() => onRemove(item.id)} className="p-1 text-slate-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all"><Trash2 className="w-3.5 h-3.5" /></button>
+            {/* 삭제 - 데스크톱 전용 */}
+            <button onClick={() => onRemove(item.id)} className="hidden md:flex p-1 text-[#8C877D] hover:text-[#D97757] hover:bg-[#FAF0EB] rounded-lg transition-all cursor-pointer" title="악보 삭제">
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
          </div>
        )}
 
-       <div className="relative w-full overflow-hidden rounded-sm ring-1 ring-slate-200 bg-white" style={{ aspectRatio: `${imageRatio * (visibleWidthFactor / visibleHeightFactor)}` }}>
+       <div className="relative w-full overflow-hidden rounded-sm ring-1 ring-[#E5E0D8] bg-white" style={{ aspectRatio: `${imageRatio * (visibleWidthFactor / visibleHeightFactor)}` }}>
           <img 
             src={blobUrl || hymnalApi.resolveImagePath(song?.filePath || song?.filename || '')} 
             className="absolute block max-w-none" 
@@ -210,13 +214,41 @@ const DraggableContiItem = React.memo(({
           />
        </div>
 
+       {/* 모바일/PC 공통 우하단 리사이즈 드래그 핸들 */}
+       {isSelected && !isPreviewMode && (
+         <div 
+           className="absolute -bottom-2 -right-2 w-5 h-5 bg-[#D97757] border-2 border-white rounded-full shadow-md flex items-center justify-center cursor-se-resize touch-none z-[102]"
+           onPointerDown={(e) => {
+             e.stopPropagation();
+             e.currentTarget.setPointerCapture(e.pointerId);
+             const startX = e.clientX;
+             const startWidth = item.width;
+             const move = (me: PointerEvent) => {
+               const dx = me.clientX - startX;
+               const dPercent = (dx / canvasWidth) * 100;
+               const newWidth = Math.round(Math.max(10, Math.min(100, startWidth + dPercent)));
+               onUpdate(item.id, { width: newWidth });
+             };
+             const up = () => {
+               window.removeEventListener('pointermove', move);
+               window.removeEventListener('pointerup', up);
+             };
+             window.addEventListener('pointermove', move);
+             window.addEventListener('pointerup', up);
+           }}
+           title="드래그하여 크기 조절"
+         >
+           <div className="w-1.5 h-1.5 bg-white rounded-full" />
+         </div>
+       )}
+
        {showContiNumbers && (
-         <div className={`absolute -top-3 -left-3 w-7 h-7 bg-slate-900 border-2 border-white text-white rounded-full items-center justify-center text-[11px] font-black shadow-xl z-[105] ${!isPreviewMode ? 'flex' : 'hidden print:flex'} print:shadow-none print:bg-black`}>
+         <div className={`absolute -top-3 -left-3 w-6 h-6 bg-[#2B2927] border-2 border-white text-[#FAF9F5] rounded-full items-center justify-center text-[10px] font-bold shadow-md z-[105] ${!isPreviewMode ? 'flex' : 'hidden print:flex'} print:shadow-none print:bg-black`}>
             {index + 1}
          </div>
        )}
 
-       {isSelected && !isPreviewMode && <div className="absolute -inset-1 border-2 border-indigo-500 rounded-lg pointer-events-none z-[101]" />}
+       {isSelected && !isPreviewMode && <div className="absolute -inset-1 border-2 border-[#D97757] rounded-lg pointer-events-none z-[101]" />}
        
        {item.isMemoOpen && (
           <div className="mt-2.5 no-print relative group/memo" onMouseDown={(e) => e.stopPropagation()}>
@@ -225,7 +257,7 @@ const DraggableContiItem = React.memo(({
               onChange={(e) => setLocalMemo(e.target.value)} 
               onBlur={() => onUpdate(item.id, { memo: localMemo })}
               placeholder="찬양 멘트..." 
-              className="w-full bg-white/95 border-2 border-slate-100 rounded-xl p-2.5 font-bold text-slate-700 shadow-lg focus:border-indigo-200 focus:outline-none transition-all resize-none custom-scrollbar" 
+              className="w-full bg-white border border-[#E5E0D8] rounded-xl p-2.5 font-medium text-[#2B2927] shadow-xs focus:border-[#D97757] focus:ring-2 focus:ring-[#D97757]/10 focus:outline-none transition-all resize-none custom-scrollbar" 
               style={{ fontSize: `${item.memoFontSize || 12}px`, height: 'auto', minHeight: '50px' }} 
             />
           </div>
@@ -280,23 +312,23 @@ const CropEditor: React.FC<{
   return (
     <motion.div 
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[10000] bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center no-print"
+      className="fixed inset-0 z-[10000] bg-[#1E1D1B]/85 backdrop-blur-md flex flex-col items-center justify-center no-print"
       onWheel={handleWheel}
     >
         <div className="absolute top-8 left-1/2 -translate-x-1/2 text-center">
-            <h3 className="text-white text-lg font-black tracking-tight">{song?.title} - 자르기 편집</h3>
-            <p className="text-slate-500 text-[10px] font-bold uppercase tracking-[0.2em] mt-1">상자 모서리를 잡아당겨 자르기 • 마우스 휠로 확대</p>
+            <h3 className="font-serif text-[#FAF9F5] text-lg font-bold tracking-tight">{song?.title} - 자르기 편집</h3>
+            <p className="text-[#A8A49C] text-xs font-medium mt-1">상자 모서리를 잡아당겨 자르기 • 마우스 휠로 확대</p>
         </div>
 
         <div ref={containerRef} className="relative w-[80vw] h-[70vh] flex items-center justify-center overflow-hidden">
             <div className="relative transition-transform duration-200 ease-out" style={{ width: `${zoom}%` }}>
                {(!blobUrl && (song?.fileId || song?.filePath)?.length > 20 && !(song?.fileId || song?.filePath)?.startsWith('/')) ? (
-                 <div className="w-full h-64 flex flex-col items-center justify-center bg-white/5 rounded-xl border border-white/10 text-white">
-                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mb-2"></div>
-                   <span className="text-sm font-bold opacity-70">구글 드라이브 원본을 불러오는 중...</span>
+                 <div className="w-full h-64 flex flex-col items-center justify-center bg-white/5 rounded-2xl border border-white/10 text-[#FAF9F5]">
+                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#D97757] mb-2"></div>
+                   <span className="text-xs font-medium opacity-80">구글 드라이브 원본을 불러오는 중...</span>
                  </div>
                ) : (
-                 <img src={blobUrl || hymnalApi.resolveImagePath(song?.filePath || song?.filename || '')} className="w-full h-auto block select-none pointer-events-none" alt="preview" />
+                 <img src={blobUrl || hymnalApi.resolveImagePath(song?.filePath || song?.filename || '')} className="w-full h-auto block select-none pointer-events-none rounded-sm shadow-2xl" alt="preview" />
                )}
                
                {/* Dimmed Area */}
@@ -310,7 +342,7 @@ const CropEditor: React.FC<{
                </div>
 
                {/* Resizable Crop Box */}
-               <div className="absolute border-2 border-indigo-400 shadow-2xl cursor-move touch-none" style={{ top: `${crop.top}%`, left: `${crop.left}%`, right: `${crop.right}%`, bottom: `${crop.bottom}%` }}
+               <div className="absolute border-2 border-[#D97757] shadow-2xl cursor-move touch-none" style={{ top: `${crop.top}%`, left: `${crop.left}%`, right: `${crop.right}%`, bottom: `${crop.bottom}%` }}
                  onPointerDown={(e) => {
                     e.currentTarget.setPointerCapture(e.pointerId);
                     const rect = (e.currentTarget as HTMLElement).parentElement!.getBoundingClientRect();
@@ -332,10 +364,10 @@ const CropEditor: React.FC<{
                     { style: 'top-[-6px] right-[-6px] cursor-ne-resize', type: 'tr' },
                     { style: 'bottom-[-6px] left-[-6px] cursor-sw-resize', type: 'bl' },
                     { style: 'bottom-[-6px] right-[-6px] cursor-se-resize', type: 'br' },
-                    { style: 'top-[-6px] left-1/2 -translate-x-1/2 cursor-n-resize h-3 w-10 bg-indigo-400', type: 'n' },
-                    { style: 'bottom-[-6px] left-1/2 -translate-x-1/2 cursor-s-resize h-3 w-10 bg-indigo-400', type: 's' },
+                    { style: 'top-[-6px] left-1/2 -translate-x-1/2 cursor-n-resize h-3 w-10 bg-[#D97757]', type: 'n' },
+                    { style: 'bottom-[-6px] left-1/2 -translate-x-1/2 cursor-s-resize h-3 w-10 bg-[#D97757]', type: 's' },
                   ].map(h => (
-                    <div key={h.type} className={`absolute z-[10] border-2 border-white bg-indigo-500 rounded-full shadow-lg ${h.style} ${!h.style.includes('h-') ? 'w-6 h-6' : 'h-4 w-12'} touch-none`}
+                    <div key={h.type} className={`absolute z-[10] border-2 border-white bg-[#D97757] rounded-full shadow-md ${h.style} ${!h.style.includes('h-') ? 'w-5 h-5' : 'h-3.5 w-10'} touch-none`}
                       onPointerDown={(e) => {
                         e.stopPropagation();
                         e.currentTarget.setPointerCapture(e.pointerId);
@@ -362,18 +394,19 @@ const CropEditor: React.FC<{
             </div>
         </div>
 
-        <div className="absolute bottom-12 flex items-center gap-8 bg-white/10 backdrop-blur-3xl px-10 py-5 rounded-[2.5rem] border border-white/20 shadow-2xl">
-           <button onClick={handleReset} className="text-slate-300 text-xs font-black uppercase hover:text-white transition-colors">초기화</button>
-           <div className="w-px h-6 bg-white/10" />
-           <div className="flex items-center gap-6">
-              <Search className="w-4 h-4 text-indigo-400" />
-              <input type="range" min="1" max="100" step="0.1" value={zoom} onChange={(e) => setZoom(Number(e.target.value))} className="w-48 accent-indigo-500 cursor-pointer" />
-              <span className="text-white font-mono text-sm">{zoom.toFixed(1)}%</span>
-           </div>
+        <div className="absolute bottom-10 flex items-center gap-6 bg-[#FAF9F5] px-7 py-3 rounded-2xl border border-[#E5E0D8] shadow-2xl">
+           <button onClick={handleReset} className="text-[#6A6864] text-xs font-semibold hover:text-[#2B2927] transition-colors cursor-pointer">초기화</button>
+           <div className="w-px h-4 bg-[#E5E0D8]" />
            <div className="flex items-center gap-3">
-              <button onClick={onCancel} className="px-6 py-2.5 rounded-2xl text-xs font-black text-slate-400 hover:text-white">취소</button>
-              <button onClick={() => onSave(crop, zoom)} className="px-10 py-3 rounded-2xl text-xs font-black bg-indigo-600 hover:bg-indigo-700 text-white shadow-xl flex items-center gap-2">
-                <Check className="w-4 h-4" /> 적용하기
+              <Search className="w-4 h-4 text-[#D97757]" />
+              <input type="range" min="1" max="100" step="0.1" value={zoom} onChange={(e) => setZoom(Number(e.target.value))} className="w-40 accent-[#D97757] cursor-pointer" />
+              <span className="text-[#2B2927] font-mono text-xs font-semibold">{zoom.toFixed(1)}%</span>
+           </div>
+           <div className="w-px h-4 bg-[#E5E0D8]" />
+           <div className="flex items-center gap-2">
+              <button onClick={onCancel} className="px-4 py-1.5 rounded-xl text-xs font-medium text-[#6A6864] hover:text-[#2B2927] hover:bg-[#F3EFE9] transition-colors cursor-pointer">취소</button>
+              <button onClick={() => onSave(crop, zoom)} className="px-5 py-1.5 rounded-xl text-xs font-semibold bg-[#D97757] hover:bg-[#C96442] text-white shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer">
+                <Check className="w-3.5 h-3.5" /> 적용하기
               </button>
            </div>
         </div>
@@ -475,7 +508,7 @@ export const ContiEditor: React.FC = () => {
   }) : null;
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className={`fixed inset-0 z-[9999] flex flex-col overflow-hidden select-none transition-colors duration-500 ${isPreviewMode ? 'bg-slate-50' : 'bg-slate-950'}`}>
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[9999] flex flex-col overflow-hidden select-none bg-[#F5F3ED]">
         <AnimatePresence>
           {cropEditingId && editingItem && editingSong && (
             <CropEditor key="crop-editor" item={editingItem} song={editingSong} onCancel={() => setCropEditingId(null)} onSave={(newCrop, newWidth) => { updateContiItem(cropEditingId, { crop: newCrop, width: newWidth }); setCropEditingId(null); }} />
@@ -504,104 +537,198 @@ export const ContiEditor: React.FC = () => {
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="fixed top-8 left-1/2 -translate-x-1/2 z-[10000] no-print"
+              className="fixed top-6 left-1/2 -translate-x-1/2 z-[10000] no-print"
             >
               <button
                 onClick={() => setIsPreviewMode(false)}
-                className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full font-black shadow-2xl flex items-center gap-2 transition-all active:scale-95"
+                className="px-5 py-2.5 bg-[#FAF9F5] border border-[#E5E0D8] text-[#2B2927] hover:text-[#D97757] hover:border-[#D97757] rounded-full text-xs font-semibold shadow-lg flex items-center gap-2 transition-all active:scale-95 cursor-pointer"
               >
-                미리보기 닫기
+                <X className="w-3.5 h-3.5 stroke-[2px]" />
+                <span>미리보기 닫기</span>
               </button>
             </motion.div>
           )}
         </AnimatePresence>
 
-        <div className={`bg-white border-b border-slate-200 z-50 no-print transition-all duration-300 shadow-sm ${isPreviewMode ? '-translate-y-full absolute w-full' : 'relative'}`}>
-          {/* 1층: h-16 고정을 풀고 반응형 flex-wrap 및 패딩 조절 */}
-          <div className="py-1.5 px-3 sm:px-4 flex flex-wrap items-center justify-between gap-4 border-b border-slate-100/50">
-            <div className="flex items-center gap-3 sm:gap-5">
-              <button onClick={() => setIsEditorOpen(false)} className="p-2 hover:bg-slate-100 rounded-xl text-slate-500 transition-colors"><ChevronLeft className="w-5 h-5 sm:w-6 sm:h-6" /></button>
-              <div className="flex items-center gap-2 sm:gap-3">
-                <div className="w-8 h-8 sm:w-10 sm:h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-100"><Layout className="w-4 h-4 sm:w-5 sm:h-5 text-white" /></div>
-                <div><h1 className="text-xs sm:text-sm font-black text-slate-900 leading-none">콘티 에디터</h1></div>
+        <div className={`bg-[#FAF9F5] border-b border-[#E5E0D8] z-50 no-print transition-all duration-300 ${isPreviewMode ? '-translate-y-full absolute w-full' : 'relative'}`}>
+          {/* 1층: 타이틀 및 핵심 조작 */}
+          <div className="py-2.5 px-4 sm:px-6 flex flex-wrap items-center justify-between gap-4 border-b border-[#E5E0D8]">
+            <div className="flex items-center gap-3">
+              <button 
+                onClick={() => setIsEditorOpen(false)} 
+                className="p-1.5 hover:bg-[#F3EFE9] rounded-lg text-[#6A6864] hover:text-[#2B2927] transition-colors cursor-pointer"
+                title="뒤로 가기"
+              >
+                <ChevronLeft className="w-5 h-5 stroke-[1.8px]" />
+              </button>
+              <div className="flex items-center gap-2">
+                <Layout className="w-4 h-4 text-[#D97757] stroke-[1.8px]" />
+                <h1 className="font-serif text-sm font-bold text-[#2B2927] tracking-tight leading-none">콘티 에디터</h1>
               </div>
             </div>
 
-            {/* 조작 영역: flex-wrap 적용 */}
+            {/* 제목 및 저장소/저장 액션 */}
             <div className="flex items-center flex-wrap gap-2 sm:gap-3">
-              <div className="flex items-center gap-2 sm:gap-3 bg-slate-50 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl border border-slate-100 group transition-all focus-within:ring-2 focus-within:ring-indigo-500/10 focus-within:border-indigo-500/50">
+              <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-[#E5E0D8] focus-within:border-[#D97757] focus-within:ring-2 focus-within:ring-[#D97757]/10 transition-all">
                 <input 
                   type="text" value={localTitle} 
                   onChange={(e) => setLocalTitle(e.target.value)}
                   onBlur={() => setContiTitle(localTitle)}
                   onKeyDown={(e) => e.key === 'Enter' && setContiTitle(localTitle)}
-                  placeholder="콘티 제목 입력..." className="bg-transparent font-bold text-xs sm:text-sm text-slate-900 focus:outline-none w-32 sm:w-48"
+                  placeholder="콘티 제목 입력..." className="bg-transparent font-serif font-semibold text-xs sm:text-sm text-[#2B2927] focus:outline-none w-32 sm:w-48 placeholder:text-[#A8A49C]"
                 />
-                <div className="w-px h-4 bg-slate-200 hidden sm:block" />
+                <div className="w-px h-3.5 bg-[#E5E0D8] hidden sm:block" />
                 <div className="hidden sm:block">
                   <SmoothSlider 
-                    label="T-Size"
+                    label="크기"
                     min={20} max={100}
                     value={contiTitleFontSize}
                     onChange={setContiTitleFontSize}
+                    accentColor="accent-[#D97757]"
                   />
                 </div>
               </div>
 
-              <div className="w-px h-6 bg-slate-200 mx-1 hidden sm:block" />
+              <div className="w-px h-4 bg-[#E5E0D8] mx-0.5 hidden sm:block" />
 
               <div className="flex items-center">
-                <button onClick={() => setIsLibraryOpen(true)} className="px-3 py-1.5 sm:px-4 sm:py-2 bg-white hover:bg-slate-50 rounded-lg text-[10px] sm:text-xs font-black text-slate-600 flex items-center gap-1.5 sm:gap-2 transition-all border border-slate-200 shadow-sm active:scale-95">
-                  <Library className="w-3.5 h-3.5 text-slate-400" /> 저장소
+                <button 
+                  onClick={() => setIsLibraryOpen(true)} 
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-[#4A4741] hover:text-[#2B2927] hover:bg-[#F3EFE9] rounded-lg transition-colors cursor-pointer"
+                >
+                  <Library className="w-3.5 h-3.5 stroke-[1.8px] text-[#6E6A63]" /> 
+                  <span>저장소</span>
                 </button>
                 <TooltipIcon text="저장된 콘티를 불러옵니다" />
               </div>
 
-              <button onClick={() => saveCurrentConti()} className="px-3 py-1.5 sm:px-4 sm:py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-[10px] sm:text-xs font-black text-white flex items-center gap-1.5 sm:gap-2 transition-all shadow-lg shadow-indigo-100 active:scale-95">
-                <Save className="w-3.5 h-3.5" /> 저장하기
+              <button 
+                onClick={() => saveCurrentConti()} 
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#D97757] hover:bg-[#C96442] text-white rounded-lg text-xs font-medium transition-colors shadow-2xs active:scale-98 cursor-pointer"
+              >
+                <Save className="w-3.5 h-3.5 stroke-[1.8px]" /> 
+                <span>저장하기</span>
               </button>
             </div>
           </div>
 
-          {/* 2층: h-14 고정을 풀고 flex-wrap 및 패딩 조절 */}
-          <div className="py-1 px-3 sm:px-4 flex flex-wrap items-center justify-between gap-3 bg-slate-50/30">
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          {/* 2층: 레이아웃 옵션 및 액션 도구들 */}
+          <div className="py-2 px-4 sm:px-6 flex flex-wrap items-center justify-between gap-3 bg-[#FAF9F5]">
+            <div className="flex flex-wrap items-center gap-2">
               <div className="flex items-center">
-                <button onClick={() => setShowContiNumbers(!showContiNumbers)} className={`px-2.5 py-1.5 sm:px-4 sm:py-2 rounded-lg text-[10px] sm:text-[11px] font-black flex items-center gap-1.5 transition-all border ${showContiNumbers ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-500 border-slate-200'}`}>
-                  <Hash className="w-3 h-3 sm:w-3.5 sm:h-3.5" /> 순번 {showContiNumbers ? 'ON' : 'OFF'}
+                <button 
+                  onClick={() => setShowContiNumbers(!showContiNumbers)} 
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                    showContiNumbers 
+                      ? 'bg-[#FAF0EB] text-[#D97757] font-semibold' 
+                      : 'text-[#6A6864] hover:text-[#2B2927] hover:bg-[#F3EFE9]'
+                  }`}
+                >
+                  <Hash className="w-3 h-3 stroke-[1.8px]" /> 
+                  <span>순번 {showContiNumbers ? 'ON' : 'OFF'}</span>
                 </button>
                 <TooltipIcon text="악보 번호보기를 끄고 켭니다" />
               </div>
-              <div className="w-px h-4 bg-slate-200 mx-0.5 hidden sm:block" />
-              <div className="flex bg-white p-0.5 sm:p-1 rounded-lg border border-slate-200 shrink-0">
-                <button onClick={() => setOrientation('portrait')} className={`px-2 py-1 sm:px-3 sm:py-1.5 rounded-md text-[9px] sm:text-[10px] font-black transition-all ${!isLandscape ? 'bg-indigo-50 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>세로</button>
-                <button onClick={() => setOrientation('landscape')} className={`px-2 py-1 sm:px-3 sm:py-1.5 rounded-md text-[9px] sm:text-[10px] font-black transition-all ${isLandscape ? 'bg-indigo-50 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>가로</button>
+
+              <div className="w-px h-3.5 bg-[#E5E0D8] mx-0.5 hidden sm:block" />
+
+              {/* 방향 토글 */}
+              <div className="flex bg-[#F3EFE9] p-0.5 rounded-lg border border-[#E5E0D8] shrink-0">
+                <button 
+                  onClick={() => setOrientation('portrait')} 
+                  className={`px-2.5 py-0.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                    !isLandscape ? 'bg-white text-[#2B2927] shadow-2xs font-semibold' : 'text-[#8C877D] hover:text-[#2B2927]'
+                  }`}
+                >
+                  세로
+                </button>
+                <button 
+                  onClick={() => setOrientation('landscape')} 
+                  className={`px-2.5 py-0.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                    isLandscape ? 'bg-white text-[#2B2927] shadow-2xs font-semibold' : 'text-[#8C877D] hover:text-[#2B2927]'
+                  }`}
+                >
+                  가로
+                </button>
               </div>
-              <div className="flex bg-white p-0.5 sm:p-1 rounded-lg border border-slate-200 shrink-0">
-                <button onClick={() => setPaperSize('A4')} className={`px-2 py-1 sm:px-3 sm:py-1.5 rounded-md text-[9px] sm:text-[10px] font-black transition-all ${paperSize === 'A4' ? 'bg-indigo-50 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>A4</button>
-                <button onClick={() => setPaperSize('A3')} className={`px-2 py-1 sm:px-3 sm:py-1.5 rounded-md text-[9px] sm:text-[10px] font-black transition-all ${paperSize === 'A3' ? 'bg-indigo-50 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>A3</button>
+
+              {/* 용지 크기 토글 */}
+              <div className="flex bg-[#F3EFE9] p-0.5 rounded-lg border border-[#E5E0D8] shrink-0">
+                <button 
+                  onClick={() => setPaperSize('A4')} 
+                  className={`px-2.5 py-0.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                    paperSize === 'A4' ? 'bg-white text-[#2B2927] shadow-2xs font-semibold' : 'text-[#8C877D] hover:text-[#2B2927]'
+                  }`}
+                >
+                  A4
+                </button>
+                <button 
+                  onClick={() => setPaperSize('A3')} 
+                  className={`px-2.5 py-0.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                    paperSize === 'A3' ? 'bg-white text-[#2B2927] shadow-2xs font-semibold' : 'text-[#8C877D] hover:text-[#2B2927]'
+                  }`}
+                >
+                  A3
+                </button>
               </div>
             </div>
             
+            {/* 우측 액션 도구들: 아이콘 + 이름 플랫 버튼 */}
             <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
               <div className="flex items-center">
-                <button onClick={() => { setIsLeaderViewerOpen(true); logActivity('뷰어', '뷰어 실행'); }} className="px-3 py-1.5 sm:px-4 sm:py-2 bg-amber-500 hover:bg-amber-600 rounded-lg text-[10px] sm:text-[11px] font-black text-white shadow-lg flex items-center gap-1.5 transition-all active:scale-95"><Layout className="w-3 h-3 sm:w-3.5 sm:h-3.5" /> 뷰어</button>
+                <button 
+                  onClick={() => { setIsLeaderViewerOpen(true); logActivity('뷰어', '뷰어 실행'); }} 
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-[#D97757] hover:bg-[#FAF0EB] rounded-lg transition-colors cursor-pointer"
+                >
+                  <Layout className="w-3.5 h-3.5 stroke-[1.8px]" /> 
+                  <span>뷰어</span>
+                </button>
                 <TooltipIcon text="인도자용 악보 뷰어와 회중용 PDF 링크를 생성합니다." />
               </div>
-              <button onClick={() => setIsPreviewMode(true)} className="px-3 py-1.5 sm:px-4 sm:py-2 bg-slate-800 hover:bg-slate-900 rounded-lg text-[10px] sm:text-[11px] font-black text-white shadow-lg flex items-center gap-1.5 transition-all active:scale-95"><Search className="w-3 h-3 sm:w-3.5 sm:h-3.5" /> 미리보기</button>
-              <button onClick={clearConti} className="px-3 py-1.5 sm:px-4 sm:py-2 bg-white text-slate-400 hover:text-red-500 rounded-lg border border-slate-200 transition-all flex items-center gap-1.5 text-[10px] sm:text-[11px] font-black"><RotateCcw className="w-3 h-3 sm:w-3.5 sm:h-3.5" /> 비우기</button>
-              <div className="w-px h-6 bg-slate-200 mx-0.5 hidden sm:block" />
-              <button onClick={() => window.print()} className="px-4 py-1.5 sm:px-5 sm:py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] sm:text-[11px] font-black shadow-lg transition-all active:scale-95">인쇄</button>
-              <button onClick={() => { if (contiItems.length > 0 && !confirm('변경사항이 저장되지 않을 수 있습니다.')) return; setIsEditorOpen(false); }} className="px-3 py-1.5 sm:px-4 sm:py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[10px] sm:text-[11px] font-black flex items-center gap-1.5 border border-slate-200 transition-all"><DoorOpen className="w-3 h-3 sm:w-3.5 sm:h-3.5" /> 취소</button>
+
+              <button 
+                onClick={() => setIsPreviewMode(true)} 
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-[#4A4741] hover:text-[#2B2927] hover:bg-[#F3EFE9] rounded-lg transition-colors cursor-pointer"
+              >
+                <Search className="w-3.5 h-3.5 stroke-[1.8px] text-[#6E6A63]" /> 
+                <span>미리보기</span>
+              </button>
+
+              <button 
+                onClick={clearConti} 
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-[#8C877D] hover:text-[#D97757] hover:bg-[#FAF0EB] rounded-lg transition-colors cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5 stroke-[1.8px]" /> 
+                <span>비우기</span>
+              </button>
+
+              <div className="w-px h-4 bg-[#E5E0D8] mx-0.5 hidden sm:block" />
+
+              <button 
+                onClick={() => window.print()} 
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[#FAF0EB] hover:bg-[#FAF0EB]/80 text-[#D97757] border border-[#F1D3C6] rounded-lg transition-colors cursor-pointer"
+              >
+                <Printer className="w-3.5 h-3.5 stroke-[1.8px]" />
+                <span>인쇄</span>
+              </button>
+
+              <button 
+                onClick={() => { if (contiItems.length > 0 && !confirm('변경사항이 저장되지 않을 수 있습니다.')) return; setIsEditorOpen(false); }} 
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-[#6A6864] hover:text-[#2B2927] hover:bg-[#F3EFE9] rounded-lg transition-colors cursor-pointer"
+              >
+                <DoorOpen className="w-3.5 h-3.5 stroke-[1.8px]" /> 
+                <span>닫기</span>
+              </button>
             </div>
           </div>
         </div>
 
-        <div className={`bg-white border-b border-slate-100 flex items-center gap-2 overflow-x-auto custom-scrollbar no-print transition-all duration-300 ${isPreviewMode ? 'opacity-0 h-0 p-0 pointer-events-none' : 'opacity-100 h-auto'}`}>
-          <div className="flex items-center px-3 py-2 border-r border-slate-100 shrink-0">
+        {/* 3층: 곡 순서 Reorder 바 */}
+        <div className={`bg-[#FAF9F5] border-b border-[#E5E0D8] flex items-center gap-2 overflow-x-auto custom-scrollbar no-print transition-all duration-300 ${isPreviewMode ? 'opacity-0 h-0 p-0 pointer-events-none' : 'opacity-100 h-auto'}`}>
+          <div className="flex items-center px-3 py-2 border-r border-[#E5E0D8] shrink-0">
              <TooltipIcon text="좌측 [악보이름]을 선택하면 아래 페이지에 악보가 보입니다. [악보이름]을 좌우로 이동하여 악보번호를 바꿉니다." />
           </div>
-          <Reorder.Group axis="x" values={contiItems} onReorder={reorderContiItems} className="px-2 pt-2 pb-5 flex items-center gap-2 flex-1">
+          <Reorder.Group axis="x" values={contiItems} onReorder={reorderContiItems} className="px-2 pt-2 pb-2.5 flex items-center gap-1.5 flex-1">
            {contiItems.filter(item => !item.isVisible || item.page === 1).map((item, idx) => {
                 const song = songs.find(s => {
                   if (!s || !s.id || !item.songId) return false;
@@ -611,12 +738,12 @@ export const ContiEditor: React.FC = () => {
                 });
                 const isAssignedToThisPage = item.isVisible && item.page === 1;
                 return (
-                  <Reorder.Item key={item.id} value={item} layout transition={{ type: "spring", stiffness: 700, damping: 40, mass: 0.8 }} className={`flex items-center gap-1 pl-1.5 pr-2.5 py-1.5 rounded-xl border shrink-0 select-none ${isAssignedToThisPage ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : (item.isVisible ? 'opacity-30 border-slate-200 pointer-events-none' : 'bg-slate-50 border-slate-100 text-slate-500')}`}>
-                     <div className="p-0.5 cursor-grab active:cursor-grabbing text-slate-400/50 hover:text-white transition-colors group touch-none"><GripVertical className="w-4 h-4 group-active:scale-110" /></div>
-                     <button onClick={() => toggleContiItemVisibility(item.id)} className="flex items-center gap-1.5">
-                       <span className={`w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-black ${isAssignedToThisPage ? 'bg-white/20 text-white' : 'bg-white text-slate-300'}`}>{idx + 1}</span>
-                       <span className="text-[13px] font-bold truncate max-w-[110px]">{song?.title}</span>
-                       {isAssignedToThisPage && <CheckCircle2 className="w-3.5 h-3.5 fill-white text-indigo-600" />}
+                  <Reorder.Item key={item.id} value={item} layout transition={{ type: "spring", stiffness: 700, damping: 40, mass: 0.8 }} className={`flex items-center gap-1 pl-1.5 pr-2.5 py-1 rounded-lg border shrink-0 select-none cursor-pointer transition-colors ${isAssignedToThisPage ? 'bg-[#FAF0EB] border-[#F1D3C6] text-[#D97757]' : (item.isVisible ? 'opacity-30 border-[#E5E0D8] pointer-events-none' : 'bg-white border-[#E5E0D8] text-[#6A6864] hover:bg-[#F3EFE9]')}`}>
+                     <div className="p-0.5 cursor-grab active:cursor-grabbing text-[#8C877D] hover:text-[#2B2927] transition-colors group touch-none"><GripVertical className="w-3.5 h-3.5 group-active:scale-110" /></div>
+                     <button onClick={() => toggleContiItemVisibility(item.id)} className="flex items-center gap-1.5 cursor-pointer">
+                       <span className={`w-4 h-4 rounded flex items-center justify-center text-[9px] font-bold ${isAssignedToThisPage ? 'bg-[#D97757] text-white' : 'bg-[#F3EFE9] text-[#8C877D]'}`}>{idx + 1}</span>
+                       <span className="text-xs font-medium truncate max-w-[120px]">{song?.title}</span>
+                       {isAssignedToThisPage && <CheckCircle2 className="w-3.5 h-3.5 text-[#D97757]" />}
                      </button>
                   </Reorder.Item>
                 );
@@ -624,8 +751,8 @@ export const ContiEditor: React.FC = () => {
           </Reorder.Group>
         </div>
 
-        <div className={`flex-1 overflow-auto p-24 flex flex-col items-center custom-scrollbar transition-all print:p-0 print:m-0 print:overflow-visible print:bg-white ${isPreviewMode ? 'bg-slate-50' : 'bg-slate-100'}`}>
-            <div className="relative flex flex-col items-center gap-20 print:gap-0 print:static">
+        <div className={`flex-1 overflow-auto p-16 flex flex-col items-center custom-scrollbar transition-all print:p-0 print:m-0 print:overflow-visible print:bg-white ${isPreviewMode ? 'bg-[#FAF9F5]' : 'bg-[#F5F3ED]'}`}>
+            <div className="relative flex flex-col items-center gap-16 print:gap-0 print:static">
                <div className="flex flex-col items-center transition-opacity duration-300 relative z-10 print:visible print:relative print:pointer-events-auto print:z-10 print:h-auto print:block">
                  <PageContent 
                    pNum={1} 
@@ -639,7 +766,7 @@ export const ContiEditor: React.FC = () => {
                </div>
             </div>
         </div>
-        <style>{`.custom-scrollbar::-webkit-scrollbar { height: 24px; width: 24px; } .custom-scrollbar::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 12px; border: 4px solid white; } @media print { * { box-shadow: none !important; -webkit-print-color-adjust: exact; } body { margin: 0; padding: 0 !important; background-color: white !important; } .no-print { display: none !important; } .page-break-after { page-break-after: always; display: block !important; margin: 0 auto !important; position: static !important; } @page { size: ${paperSize} ${orientation}; margin: 0; } .bg-slate-950, .bg-slate-100 { background: white !important; } }`}</style>
+        <style>{`.custom-scrollbar::-webkit-scrollbar { height: 5px; width: 5px; } .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(195, 190, 180, 0.45); border-radius: 9999px; } @media print { * { box-shadow: none !important; -webkit-print-color-adjust: exact; } body { margin: 0; padding: 0 !important; background-color: white !important; } .no-print { display: none !important; } .page-break-after { page-break-after: always; display: block !important; margin: 0 auto !important; position: static !important; } @page { size: ${paperSize} ${orientation}; margin: 0; } }`}</style>
     </motion.div>
   );
 };

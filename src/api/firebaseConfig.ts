@@ -4,7 +4,7 @@ import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 
 const firebaseConfig = {
   apiKey: "AIzaSyDZ6oJraivKbXSrokuYnhhHuxlMW1s1Qac",
-  authDomain: "ccm-ymoonsik.firebaseapp.com",
+  authDomain: "studio.thenations.kr",
   projectId: "ccm-ymoonsik",
   storageBucket: "ccm-ymoonsik.firebasestorage.app",
   messagingSenderId: "21582961373",
