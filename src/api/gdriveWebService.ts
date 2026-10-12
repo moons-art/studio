@@ -1,12 +1,20 @@
 // src/api/gdriveWebService.ts
 import { imageCache } from '../utils/imageCache';
 import { auth, googleProvider } from './firebaseConfig';
-import { signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
+import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut } from 'firebase/auth';
 
 const GAPI_CLIENT_ID = '21582961373-3tb1ja43c31vsfpjepnvthiq5qle8krp.apps.googleusercontent.com';
 
 // ✅ 로컬 개발 전용 구글 계정 우회 플래그 (배포 시 false로 변경)
 export const IS_LOCAL_DEV = false;
+
+// 모바일, 태블릿(최신 iPadOS 포함), 카카오톡/인앱 브라우저 완벽 감지 헬퍼
+export const isMobileOrTabletDevice = (): boolean => {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  const isIPadOS = (navigator.platform === 'MacIntel' || /Macintosh/i.test(ua)) && (navigator.maxTouchPoints > 1);
+  return /Android|iPhone|iPad|iPod|Mobile|Tablet|KAKAOTALK|NAVER|Instagram|FB|Line/i.test(ua) || isIPadOS;
+};
 
 // 구글 API 초기화 상태
 let isGapiLoaded = false;
@@ -269,6 +277,53 @@ if (typeof window !== 'undefined') {
   });
 }
 
+// 리다이렉트 로그인 결과 자동 복원
+export const processRedirectResult = async (): Promise<boolean> => {
+  try {
+    const userCredential = await getRedirectResult(auth);
+    if (userCredential) {
+      console.log('[gdriveWebService] getRedirectResult success:', userCredential.user.email);
+      const credential = GoogleAuthProvider.credentialFromResult(userCredential);
+      const token = credential?.accessToken;
+
+      if (token) {
+        accessToken = token;
+        applyTokenToGapiClient(token);
+        try {
+          localStorage.setItem('gdrive_token', token);
+          localStorage.setItem('gdrive_token_expires_at', String(Date.now() + 3600 * 1000));
+        } catch (e) {}
+
+        try {
+          const profile: GoogleUserProfile = {
+            id: userCredential.user.uid,
+            name: userCredential.user.displayName || '',
+            email: userCredential.user.email || '',
+            picture: userCredential.user.photoURL || ''
+          };
+          localStorage.setItem('offline_user_profile', JSON.stringify(profile));
+        } catch (e) {}
+
+        try {
+          await gdriveWebService.getNationsRootFolderId();
+          await gdriveWebService.getAppFolderId('Nations Studio');
+        } catch (e) {}
+
+        window.dispatchEvent(new Event('gdrive_authenticated'));
+        return true;
+      }
+    }
+  } catch (err: any) {
+    console.warn('[gdriveWebService] getRedirectResult non-fatal:', err);
+  }
+  return false;
+};
+
+// 모듈 로드 시 백그라운드 리다이렉트 결과 복원 시도
+if (typeof window !== 'undefined') {
+  processRedirectResult().catch(() => {});
+}
+
 export const gdriveWebService = {
   // 토큰 반환
   getAccessToken: () => accessToken,
@@ -287,14 +342,26 @@ export const gdriveWebService = {
       return true;
     }
 
-    try {
-      // 1. 구글 드라이브 및 프로필 스코프 지정
-      googleProvider.addScope('https://www.googleapis.com/auth/drive.file');
-      googleProvider.addScope('https://www.googleapis.com/auth/drive.appdata');
-      googleProvider.addScope('https://www.googleapis.com/auth/userinfo.profile');
-      googleProvider.addScope('https://www.googleapis.com/auth/userinfo.email');
+    // 1. 구글 드라이브 및 프로필 스코프 지정
+    googleProvider.addScope('https://www.googleapis.com/auth/drive.file');
+    googleProvider.addScope('https://www.googleapis.com/auth/drive.appdata');
+    googleProvider.addScope('https://www.googleapis.com/auth/userinfo.profile');
+    googleProvider.addScope('https://www.googleapis.com/auth/userinfo.email');
 
-      // 2. Firebase Auth 팝업 로그인 실행 (origin_mismatch 원천 차단)
+    // 2. 모바일/태블릿/인앱 브라우저 환경 감지 -> 100% 즉시 리다이렉트 실행
+    if (isMobileOrTabletDevice()) {
+      console.log('[gdriveWebService] 📱 Mobile/Tablet/InApp environment detected. Redirecting to Google Login...');
+      try {
+        await signInWithRedirect(auth, googleProvider);
+        return true;
+      } catch (redirectErr: any) {
+        console.error('[gdriveWebService] Google redirect error:', redirectErr);
+        throw redirectErr;
+      }
+    }
+
+    // 3. 데스크톱 PC 환경 -> 팝업 우선 시도, 차단 시 리다이렉트로 자동 전환
+    try {
       const userCredential = await signInWithPopup(auth, googleProvider);
       const credential = GoogleAuthProvider.credentialFromResult(userCredential);
       const token = credential?.accessToken;
@@ -329,9 +396,26 @@ export const gdriveWebService = {
       return true;
     } catch (err: any) {
       console.warn('[gdriveWebService] Firebase signInWithPopup error:', err);
+
       // 사용자가 팝업을 직접 닫은 경우 조용히 취소
       if (err?.code === 'auth/popup-closed-by-user') {
         return false;
+      }
+
+      // 팝업이 차단되었거나 지원되지 않는 환경일 때 즉시 리다이렉트로 자동 전환
+      if (
+        err?.code === 'auth/popup-blocked' ||
+        err?.code === 'auth/operation-not-supported-in-this-environment' ||
+        err?.code === 'auth/cancelled-popup-request'
+      ) {
+        console.info('[gdriveWebService] Popup blocked. Falling back to signInWithRedirect...');
+        try {
+          await signInWithRedirect(auth, googleProvider);
+          return true;
+        } catch (fallbackErr: any) {
+          console.error('[gdriveWebService] Google redirect fallback error:', fallbackErr);
+          throw fallbackErr;
+        }
       }
 
       // 만약 GSI tokenClient fallback이 가능하면 시도

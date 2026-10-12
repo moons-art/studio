@@ -6,10 +6,12 @@ import { ContiEditor } from './components/Hymnal/ContiEditor';
 import { MobilePdfLayout } from './components/Hymnal/MobilePdfLayout';
 import { TeamShareWindow } from './components/Hymnal/TeamShareWindow';
 import { TooltipIcon } from './components/TooltipIcon';
-import { PanelLeft, Music, Settings, X, WifiOff, Library, Layout, RotateCcw, HelpCircle, Share2 } from 'lucide-react';
+import { PanelLeft, Music, Settings, X, WifiOff, Library, Layout, RotateCcw, HelpCircle, Share2, CreditCard } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { initGoogleApi, IS_LOCAL_DEV } from './api/gdriveWebService';
 import { logActivity } from './utils/logger';
+import { auth } from './api/firebaseConfig';
+import { ClaudeAuthPage } from './components/ClaudeAuthPage';
 
 const AdminModal = React.lazy(() => import('./components/AdminModal').then(m => ({ default: m.AdminModal })));
 
@@ -34,6 +36,8 @@ const MainApp: React.FC = () => {
   const [userProfile, setUserProfile] = useState<{name: string, email: string, picture: string} | null>(null);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [showAdminModal, setShowAdminModal] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authPageSection, setAuthPageSection] = useState<'login' | 'pricing'>('login');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(() => {
     const saved = localStorage.getItem('studio-left-sidebar-width');
@@ -217,18 +221,12 @@ const MainApp: React.FC = () => {
               <div className="mt-auto pt-2 border-t border-[#F0EBE1] space-y-1 shrink-0">
                 {!isAuthenticated ? (
                   <button
-                    onClick={async () => {
-                      const { gdriveWebService } = await import('./api/gdriveWebService');
-                      const success = await gdriveWebService.login();
-                      if (success) {
-                        await gdriveWebService.getNationsRootFolderId();
-                        await gdriveWebService.getAppFolderId('Nations Studio');
-                        setTimeout(() => window.dispatchEvent(new Event('gdrive_authenticated')), 500);
-                      } else {
-                        alert('로그인 실패: 구글 인증이 완료되지 않았습니다.');
-                      }
+                    onClick={() => {
+                      setAuthPageSection('login');
+                      setShowAuthModal(true);
+                      setIsSidebarOpen(false);
                     }}
-                    className="w-full flex items-center gap-2 py-2 px-2.5 bg-[#F3EFE9]/70 border border-[#E5E0D8] text-[#4A4741] rounded-xl hover:bg-[#EBE5DC] transition-all group cursor-pointer"
+                    className="w-full flex items-center gap-2 py-2 px-2.5 bg-[#F3EFE9]/70 border border-[#E5E0D8] text-[#4A4741] rounded-xl hover:bg-[#EBE5DC] transition-all group cursor-pointer shadow-2xs"
                   >
                     <svg className="w-4 h-4 shrink-0 grayscale opacity-70 group-hover:opacity-100 transition-opacity" viewBox="0 0 24 24">
                       <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -236,11 +234,19 @@ const MainApp: React.FC = () => {
                       <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
                       <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
                     </svg>
-                    <span className="text-xs font-normal text-[#4A4741]">Google 로그인</span>
+                    <span className="text-xs font-normal text-[#4A4741]">로그인 / 간편가입</span>
                   </button>
                 ) : (
                   <div className="flex items-center justify-between bg-[#F3EFE9]/70 border border-[#E8E2D9] p-1.5 rounded-xl">
-                    <div className="flex items-center gap-2 overflow-hidden min-w-0 pr-1">
+                    <button
+                      onClick={() => {
+                        setAuthPageSection('login');
+                        setShowAuthModal(true);
+                        setIsSidebarOpen(false);
+                      }}
+                      className="flex items-center gap-2 overflow-hidden min-w-0 pr-1 hover:opacity-85 transition-opacity cursor-pointer text-left"
+                      title="내 프로필 및 계정 정보 확인"
+                    >
                       {userProfile?.picture ? (
                         <img src={userProfile.picture} alt="Profile" className="w-6 h-6 rounded-full shrink-0 border border-[#E5E0D8]" />
                       ) : (
@@ -254,7 +260,7 @@ const MainApp: React.FC = () => {
                           <WifiOff className="w-3 h-3 text-[#D97757] shrink-0 stroke-[1.5px]" title="오프라인 모드" />
                         )}
                       </div>
-                    </div>
+                    </button>
                     <button
                       onClick={async () => {
                         if (confirm('로그아웃 하시겠습니까?')) {
@@ -269,6 +275,25 @@ const MainApp: React.FC = () => {
                     </button>
                   </div>
                 )}
+
+                {/* 요금관련 메뉴 (로그인 아래에 추가) */}
+                <button
+                  onClick={() => {
+                    setAuthPageSection('pricing');
+                    setShowAuthModal(true);
+                    setIsSidebarOpen(false);
+                  }}
+                  className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl hover:bg-[#F3EFE9] transition-colors text-[#4A4741] hover:text-[#2B2927] cursor-pointer text-left"
+                  title="이용권 및 요금제 안내"
+                >
+                  <div className="flex items-center gap-2">
+                    <CreditCard className="w-4 h-4 stroke-[1.5px] text-[#6E6A63]" />
+                    <span className="text-xs font-normal">이용권 및 요금 안내</span>
+                  </div>
+                  <span className="text-[10px] font-semibold text-[#D97757] bg-[#FAF0EB] px-1.5 py-0.5 rounded-md border border-[#F1D3C6]">
+                    Free / 플랜
+                  </span>
+                </button>
 
                 {/* 설정 */}
                 <div className="flex items-center gap-2 px-2.5 py-1.5 w-full hover:bg-[#F3EFE9] rounded-xl transition-colors text-[#4A4741] hover:text-[#2B2927] cursor-pointer">
@@ -644,6 +669,15 @@ const MainApp: React.FC = () => {
           <TeamShareWindow onClose={() => setIsTeamShareOpen(false)} />
         )}
       </AnimatePresence>
+
+      {/* 클로드 스타일 전체화면 로그인 & 요금제 페이지 */}
+      <ClaudeAuthPage
+        isOpen={showAuthModal}
+        initialSection={authPageSection}
+        onClose={() => setShowAuthModal(false)}
+        currentUser={auth.currentUser}
+        userProfile={userProfile}
+      />
     </div>
   );
 };

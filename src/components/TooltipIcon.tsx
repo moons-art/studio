@@ -61,16 +61,26 @@ export const TooltipIcon = ({ text, position = 'inline' }: { text: string; posit
       }}
       title="설명 보기"
     >
-      <button
-        type="button"
-        className={`w-4 h-4 rounded transition-all cursor-pointer flex items-center justify-center p-0 ${
+      <span
+        role="button"
+        tabIndex={0}
+        aria-label="설명 보기"
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            e.stopPropagation();
+            updatePosition();
+            setIsOpen(!isOpen);
+          }
+        }}
+        className={`w-4 h-4 rounded transition-all cursor-pointer inline-flex items-center justify-center p-0 ${
           isOpen 
             ? 'text-[#2B2927] bg-[#EBE5DC]' 
             : 'text-[#8C877D] hover:text-[#2B2927] hover:bg-[#DED8CE]/60'
         }`}
       >
         <MoreVertical className="w-3.5 h-3.5 stroke-[1.8px]" />
-      </button>
+      </span>
 
       {isOpen && createPortal(
         <div 
