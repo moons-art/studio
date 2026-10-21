@@ -9,6 +9,8 @@ import { TooltipIcon } from './components/TooltipIcon';
 import { PanelLeft, Music, Settings, X, WifiOff, Library, Layout, RotateCcw, HelpCircle, Share2, CreditCard } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { initGoogleApi, IS_LOCAL_DEV } from './api/gdriveWebService';
+import { auth } from './api/firebaseConfig';
+import { startKakaoLogin, startNaverLogin, processOAuthCallback, syncUserWithHub, getSocialUserMeta } from './utils/socialAuth';
 import { logActivity } from './utils/logger';
 import { auth } from './api/firebaseConfig';
 import { ClaudeAuthPage } from './components/ClaudeAuthPage';
@@ -115,6 +117,42 @@ const MainApp: React.FC = () => {
   }, [showSettings]);
 
   useEffect(() => {
+    processOAuthCallback(auth).then((res) => {
+      if (res && !res.success && res.error) {
+        alert(res.error);
+      }
+    }).catch((err) => {
+      console.warn('[App] processOAuthCallback warning:', err);
+    });
+
+    const unsubAuth = auth.onAuthStateChanged((user) => {
+      if (user) {
+        const socialMeta = getSocialUserMeta(user);
+        const resolvedEmail = user.email || socialMeta?.email || '';
+        const resolvedName = user.displayName || socialMeta?.displayName || resolvedEmail.split('@')[0] || '사용자';
+        const resolvedPhoto = user.photoURL || socialMeta?.photoURL || '';
+        setIsAuthenticated(true);
+        setUserProfile({
+          name: resolvedName,
+          email: resolvedEmail,
+          picture: resolvedPhoto,
+        });
+        // 카카오/네이버 로그인 시에도 오프라인 프로필 및 활동 로그(logActivity)가 정상 동작하도록 보장
+        if (!localStorage.getItem('gdrive_token')) {
+          try {
+            localStorage.setItem('offline_user_profile', JSON.stringify({
+              id: user.uid,
+              name: resolvedName,
+              email: resolvedEmail,
+              picture: resolvedPhoto,
+            }));
+          } catch (e) {}
+          logActivity('로그인');
+        }
+        syncUserWithHub(user, 'studio').catch(() => {});
+      }
+    });
+
     initGoogleApi(() => {
       console.log('[App] Google API successfully initialized.');
       setIsApiLoaded(true);
@@ -146,6 +184,7 @@ const MainApp: React.FC = () => {
       window.removeEventListener('gdrive_authenticated', handleAuth);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      unsubAuth();
     };
   }, []);
 
@@ -220,6 +259,7 @@ const MainApp: React.FC = () => {
               {/* 최하단: 구글 로그인 & 설정 영역 */}
               <div className="mt-auto pt-2 border-t border-[#F0EBE1] space-y-1 shrink-0">
                 {!isAuthenticated ? (
+                  <div className="flex flex-col">
                   <button
                     onClick={() => {
                       setAuthPageSection('login');
@@ -236,6 +276,27 @@ const MainApp: React.FC = () => {
                     </svg>
                     <span className="text-xs font-normal text-[#4A4741]">로그인 / 간편가입</span>
                   </button>
+                  <div className="grid grid-cols-2 gap-1.5 mt-1">
+                    <button
+                      type="button"
+                      onClick={() => startKakaoLogin('studio')}
+                      className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-[#FEE500] hover:bg-[#FDD800] text-[#191919] rounded-xl text-[11px] font-semibold transition-all cursor-pointer"
+                    >
+                      <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="#191919">
+                        <path d="M12 3C6.477 3 2 6.463 2 10.735c0 2.78 1.884 5.217 4.716 6.578-.154.557-.991 3.588-1.028 3.816-.047.29.106.286.224.208.092-.06 3.658-2.482 5.134-3.489.312.031.63.047.954.047 5.523 0 10-3.463 10-7.735S17.523 3 12 3z" />
+                      </svg>
+                      <span>카카오</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => startNaverLogin('studio')}
+                      className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-[#03C75A] hover:bg-[#02B350] text-white rounded-xl text-[11px] font-semibold transition-all cursor-pointer"
+                    >
+                      <span className="font-black text-[11px] leading-none">N</span>
+                      <span>네이버</span>
+                    </button>
+                  </div>
+                  </div>
                 ) : (
                   <div className="flex items-center justify-between bg-[#F3EFE9]/70 border border-[#E8E2D9] p-1.5 rounded-xl">
                     <button

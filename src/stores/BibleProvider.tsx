@@ -4,7 +4,7 @@ import { searchService } from '../services/searchService';
 import { BibleParser } from '../services/bibleParser';
 import { BibleContext, type CopyMode } from './BibleContext';
 import { bibleDB } from '../utils/indexedDB';
-import { db } from '../api/firebaseConfig';
+import { db, auth } from '../api/firebaseConfig';
 import { doc, collection, onSnapshot, setDoc, deleteDoc } from 'firebase/firestore';
 import { fetchUserProfile } from '../api/gdriveWebService';
 

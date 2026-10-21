@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } f
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, FileEdit, Plus, Calendar, Search, Save, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, PanelRight, PanelBottom, Maximize2, Type, Minus, Copy, Trash2 } from 'lucide-react';
-import { db } from '../api/firebaseConfig';
+import { db, auth } from '../api/firebaseConfig';
 import { doc, collection, onSnapshot, setDoc, deleteDoc } from 'firebase/firestore';
 
 import { fetchUserProfile } from '../api/gdriveWebService';
@@ -75,7 +75,13 @@ export const SermonSidebar = forwardRef<SermonSidebarRef, SermonSidebarProps>(({
     const handleAuth = async () => {
       const { gdriveWebService } = await import('../api/gdriveWebService');
       const token = gdriveWebService.getAccessToken();
-      if (!token || token === 'mock_local_token_123') return;
+      if (!token || token === 'mock_local_token_123') {
+        if (auth.currentUser?.uid) {
+          setGoogleUserId(auth.currentUser.uid);
+          subscribeToSermons(auth.currentUser.uid);
+        }
+        return;
+      }
       const profile = await fetchUserProfile(token);
       if (profile && profile.id) {
         setGoogleUserId(profile.id);

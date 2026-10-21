@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { X, FileEdit, Plus, Calendar, Search, Trash2 } from 'lucide-react';
-import { db } from '../api/firebaseConfig';
+import { db, auth } from '../api/firebaseConfig';
 import { doc, collection, onSnapshot, deleteDoc } from 'firebase/firestore';
 
 interface Sermon {
@@ -23,7 +23,13 @@ export const SermonListModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
     const handleAuth = async () => {
       const { gdriveWebService } = await import('../api/gdriveWebService');
       const token = gdriveWebService.getAccessToken();
-      if (!token || token === 'mock_local_token_123') return;
+      if (!token || token === 'mock_local_token_123') {
+        if (auth.currentUser?.uid) {
+          setGoogleUserId(auth.currentUser.uid);
+          
+        }
+        return;
+      }
       const profile = await fetchUserProfile(token);
       if (!profile || !profile.id) return;
       setGoogleUserId(profile.id);

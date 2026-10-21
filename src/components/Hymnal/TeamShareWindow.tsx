@@ -3,6 +3,7 @@ import { useHymnal } from '../../stores/HymnalProvider';
 import { hymnalApi } from '../../api/hymnalApi';
 import { gdriveWebService } from '../../api/gdriveWebService';
 import { db } from '../../api/firebaseConfig';
+import { shareInviteViaKakao } from '../../utils/socialAuth';
 import { collection, query, orderBy, limit, onSnapshot, addDoc, deleteDoc, doc, setDoc, getDocs, updateDoc } from 'firebase/firestore';
 import { 
   ChevronLeft, ChevronRight, Share2, Copy, Check, MessageSquare, Send, 
@@ -870,6 +871,28 @@ export const TeamShareWindow: React.FC<{
               )}
             </button>
           )}
+
+          {/* 카카오톡 공유 버튼 */}
+          <button
+            onClick={() => {
+              const url = `${window.location.origin}${window.location.pathname}?mode=team-share&team=${encodeURIComponent(worshipTeamName)}&contiId=${selectedContiId}`;
+              const shared = shareInviteViaKakao({
+                inviteUrl: url,
+                userName: worshipTeamName,
+                appName: 'NATIONS STUDIO',
+                title: `[${worshipTeamName}] 찬양 콘티 및 악보 공유`,
+                description: '실시간 콘티 악보와 참고 영상, 파트별 코멘트를 확인하세요.',
+              });
+              if (!shared) handleCopyShareLink();
+            }}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-[#FEE500] hover:bg-[#FDD800] text-[#191919] transition-all cursor-pointer shadow-2xs"
+            title="카카오톡으로 찬양팀 공유 링크 전송"
+          >
+            <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="#191919">
+              <path d="M12 3C6.477 3 2 6.463 2 10.735c0 2.78 1.884 5.217 4.716 6.578-.154.557-.991 3.588-1.028 3.816-.047.29.106.286.224.208.092-.06 3.658-2.482 5.134-3.489.312.031.63.047.954.047 5.523 0 10-3.463 10-7.735S17.523 3 12 3z" />
+            </svg>
+            <span className="hidden sm:inline">카톡 공유</span>
+          </button>
 
           {/* 접속주소 복사 버튼 */}
           <button
