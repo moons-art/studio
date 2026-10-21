@@ -12,7 +12,6 @@ import { initGoogleApi, IS_LOCAL_DEV } from './api/gdriveWebService';
 import { auth } from './api/firebaseConfig';
 import { startKakaoLogin, startNaverLogin, processOAuthCallback, syncUserWithHub, getSocialUserMeta } from './utils/socialAuth';
 import { logActivity } from './utils/logger';
-import { auth } from './api/firebaseConfig';
 import { ClaudeAuthPage } from './components/ClaudeAuthPage';
 
 const AdminModal = React.lazy(() => import('./components/AdminModal').then(m => ({ default: m.AdminModal })));
