@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
 import { getAuth, GoogleAuthProvider, setPersistence, browserLocalPersistence } from 'firebase/auth';
+import { getFunctions } from 'firebase/functions';
 
 // 1. 스튜디오 앱 고유 데이터 저장소 (ccm-ymoonsik) - 찬양 악보, 콘티, 찬양팀 공유방 등 100% 보존
 const firebaseConfig = {
@@ -37,6 +38,9 @@ export const db = initializeFirestore(app, {
 
 // Initialize Hub Firestore for central user registry sync (sermon-ym)
 export const authDb = getFirestore(authApp);
+
+// Initialize Functions (ccm-ymoonsik 서울 리전 asia-northeast3)
+export const functions = getFunctions(app, 'asia-northeast3');
 
 // Initialize Unified Auth (sermon-ym)
 export const auth = getAuth(authApp);
