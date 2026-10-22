@@ -6,13 +6,16 @@ import { ContiEditor } from './components/Hymnal/ContiEditor';
 import { MobilePdfLayout } from './components/Hymnal/MobilePdfLayout';
 import { TeamShareWindow } from './components/Hymnal/TeamShareWindow';
 import { TooltipIcon } from './components/TooltipIcon';
-import { PanelLeft, Music, Settings, X, WifiOff, Library, Layout, RotateCcw, HelpCircle, Share2, CreditCard } from 'lucide-react';
+import { PanelLeft, Music, Settings, X, WifiOff, Library, Layout, RotateCcw, HelpCircle, Share2, CreditCard, Gift, User as UserIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { initGoogleApi, IS_LOCAL_DEV } from './api/gdriveWebService';
 import { auth } from './api/firebaseConfig';
 import { startKakaoLogin, startNaverLogin, processOAuthCallback, syncUserWithHub, getSocialUserMeta } from './utils/socialAuth';
 import { logActivity } from './utils/logger';
 import { ClaudeAuthPage } from './components/ClaudeAuthPage';
+import { InviteBonusModal } from './components/InviteBonusModal';
+import { AccountModal } from './components/AccountModal';
+import { PolicyViewModal, type PolicyModalType } from './components/PolicyViewModal';
 
 const AdminModal = React.lazy(() => import('./components/AdminModal').then(m => ({ default: m.AdminModal })));
 
@@ -37,7 +40,7 @@ const MainApp: React.FC = () => {
   const [userProfile, setUserProfile] = useState<{name: string, email: string, picture: string} | null>(null);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [showAdminModal, setShowAdminModal] = useState(false);
-  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(true);
   const [authPageSection, setAuthPageSection] = useState<'login' | 'pricing'>('login');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(() => {
@@ -48,6 +51,12 @@ const MainApp: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [isTeamShareOpen, setIsTeamShareOpen] = useState(false);
   const [showTeamNameModal, setShowTeamNameModal] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [showAccountModal, setShowAccountModal] = useState(false);
+  const [policyModal, setPolicyModal] = useState<{ isOpen: boolean; tab: PolicyModalType }>({
+    isOpen: false,
+    tab: 'terms'
+  });
   const [worshipTeamNameDraft, setWorshipTeamNameDraft] = useState(() => {
     return localStorage.getItem('nations-worship-team-name') || localStorage.getItem('ceum-worship-team-name') || 'NATIONS 찬양팀';
   });
@@ -255,58 +264,86 @@ const MainApp: React.FC = () => {
                 <HymnalSidebar />
               </div>
 
-              {/* 최하단: 구글 로그인 & 설정 영역 */}
-              <div className="mt-auto pt-2 border-t border-[#F0EBE1] space-y-1 shrink-0">
-                {!isAuthenticated ? (
-                  <div className="flex flex-col">
+              {/* 최하단: 플랜, 친구초대, 프로필, 계정, 푸터 영역 (SERMON 앱과 동일 레이아웃) */}
+              <div className="mt-auto pt-2 border-t border-[#F0EBE1] space-y-1.5 shrink-0 bg-[#FAF9F6] p-1.5 rounded-2xl">
+                {/* 1. 플랜 이름 & 플랜 업그레이드 */}
+                <div className="flex items-center justify-between px-2 pt-1">
+                  <span className="text-xs font-bold text-[#1C1A18]">무료 플랜</span>
                   <button
+                    type="button"
                     onClick={() => {
-                      setAuthPageSection('login');
+                      setAuthPageSection('pricing');
                       setShowAuthModal(true);
                       setIsSidebarOpen(false);
                     }}
-                    className="w-full flex items-center gap-2 py-2 px-2.5 bg-[#F3EFE9]/70 border border-[#E5E0D8] text-[#4A4741] rounded-xl hover:bg-[#EBE5DC] transition-all group cursor-pointer shadow-2xs"
+                    className="text-[11px] font-bold text-[#DA7756] hover:text-[#C46A40] hover:underline cursor-pointer"
                   >
-                    <svg className="w-4 h-4 shrink-0 grayscale opacity-70 group-hover:opacity-100 transition-opacity" viewBox="0 0 24 24">
-                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-                    </svg>
-                    <span className="text-xs font-normal text-[#4A4741]">로그인 / 간편가입</span>
+                    플랜 업그레이드
                   </button>
-                  <div className="grid grid-cols-2 gap-1.5 mt-1">
-                    <button
-                      type="button"
-                      onClick={() => startKakaoLogin('studio')}
-                      className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-[#FEE500] hover:bg-[#FDD800] text-[#191919] rounded-xl text-[11px] font-semibold transition-all cursor-pointer"
-                    >
-                      <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="#191919">
-                        <path d="M12 3C6.477 3 2 6.463 2 10.735c0 2.78 1.884 5.217 4.716 6.578-.154.557-.991 3.588-1.028 3.816-.047.29.106.286.224.208.092-.06 3.658-2.482 5.134-3.489.312.031.63.047.954.047 5.523 0 10-3.463 10-7.735S17.523 3 12 3z" />
-                      </svg>
-                      <span>카카오</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => startNaverLogin('studio')}
-                      className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-[#03C75A] hover:bg-[#02B350] text-white rounded-xl text-[11px] font-semibold transition-all cursor-pointer"
-                    >
-                      <span className="font-black text-[11px] leading-none">N</span>
-                      <span>네이버</span>
-                    </button>
+                </div>
+
+                {/* 2. 친구 초대 1+1 보너스 */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowInviteModal(true);
+                    setIsSidebarOpen(false);
+                  }}
+                  className="w-full flex items-center justify-between px-2 py-1.5 rounded-xl hover:bg-[#F3EFE9] transition-colors text-left cursor-pointer group"
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Gift className="w-4 h-4 text-[#DA7756] shrink-0" />
+                    <span className="text-xs font-semibold text-[#2C2B29] group-hover:text-[#DA7756] truncate">
+                      친구 초대 1+1 보너스
+                    </span>
                   </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-between bg-[#F3EFE9]/70 border border-[#E8E2D9] p-1.5 rounded-xl">
+                </button>
+
+                                <div className="border-t border-[#EAE8E1] my-1" />
+
+                {/* 3. 사용자 프로필 박스 (or 로그인/간편가입) */}
+                {!isAuthenticated ? (
+                  <div className="flex flex-col gap-1">
                     <button
                       onClick={() => {
                         setAuthPageSection('login');
                         setShowAuthModal(true);
                         setIsSidebarOpen(false);
                       }}
-                      className="flex items-center gap-2 overflow-hidden min-w-0 pr-1 hover:opacity-85 transition-opacity cursor-pointer text-left"
-                      title="내 프로필 및 계정 정보 확인"
+                      className="w-full flex items-center gap-2 py-2 px-2.5 bg-[#F3EFE9]/70 border border-[#E5E0D8] text-[#4A4741] rounded-xl hover:bg-[#EBE5DC] transition-all group cursor-pointer shadow-2xs"
                     >
+                      <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                      </svg>
+                      <span className="text-xs font-semibold text-[#4A4741]">로그인 / 간편가입</span>
+                    </button>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => startKakaoLogin('studio')}
+                        className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-[#FEE500] hover:bg-[#FDD800] text-[#191919] rounded-xl text-[11px] font-semibold transition-all cursor-pointer shadow-2xs"
+                      >
+                        <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="#191919">
+                          <path d="M12 3C6.477 3 2 6.463 2 10.735c0 2.78 1.884 5.217 4.716 6.578-.154.557-.991 3.588-1.028 3.816-.047.29.106.286.224.208.092-.06 3.658-2.482 5.134-3.489.312.031.63.047.954.047 5.523 0 10-3.463 10-7.735S17.523 3 12 3z" />
+                        </svg>
+                        <span>카카오</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => startNaverLogin('studio')}
+                        className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-[#03C75A] hover:bg-[#02B350] text-white rounded-xl text-[11px] font-semibold transition-all cursor-pointer shadow-2xs"
+                      >
+                        <span className="font-black text-[11px] leading-none">N</span>
+                        <span>네이버</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between bg-[#F3EFE9]/70 border border-[#E8E2D9] p-1.5 rounded-xl">
+                    <div className="flex items-center gap-2 overflow-hidden min-w-0 pr-1">
                       {userProfile?.picture ? (
                         <img src={userProfile.picture} alt="Profile" className="w-6 h-6 rounded-full shrink-0 border border-[#E5E0D8]" />
                       ) : (
@@ -314,13 +351,18 @@ const MainApp: React.FC = () => {
                           {userProfile?.name?.charAt(0) || 'U'}
                         </div>
                       )}
-                      <div className="flex items-center gap-1 min-w-0">
-                        <span className="text-xs font-normal text-[#2B2927] truncate">{userProfile?.name || '사용자'}</span>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-xs font-normal text-[#2B2927] truncate">
+                          {userProfile?.name || '사용자'}
+                        </span>
+                        <span className="px-1.5 py-0.2 text-[9px] font-medium text-[#7D786F] bg-[#EBE5DC] rounded">
+                          admin
+                        </span>
                         {isOffline && (
                           <WifiOff className="w-3 h-3 text-[#D97757] shrink-0 stroke-[1.5px]" title="오프라인 모드" />
                         )}
                       </div>
-                    </button>
+                    </div>
                     <button
                       onClick={async () => {
                         if (confirm('로그아웃 하시겠습니까?')) {
@@ -336,39 +378,69 @@ const MainApp: React.FC = () => {
                   </div>
                 )}
 
-                {/* 요금관련 메뉴 (로그인 아래에 추가) */}
+                {/* 4. 계정 버튼 (클릭 시 세르몬 앱 스타일 계정 모달 오픈) */}
                 <button
+                  type="button"
                   onClick={() => {
-                    setAuthPageSection('pricing');
-                    setShowAuthModal(true);
+                    setShowAccountModal(true);
                     setIsSidebarOpen(false);
                   }}
-                  className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl hover:bg-[#F3EFE9] transition-colors text-[#4A4741] hover:text-[#2B2927] cursor-pointer text-left"
-                  title="이용권 및 요금제 안내"
+                  className="flex items-center gap-2 px-2.5 py-1.5 w-full rounded-xl text-xs font-normal text-[#4A4741] hover:text-[#2B2927] hover:bg-[#F3EFE9] transition-all cursor-pointer"
                 >
-                  <div className="flex items-center gap-2">
-                    <CreditCard className="w-4 h-4 stroke-[1.5px] text-[#6E6A63]" />
-                    <span className="text-xs font-normal">이용권 및 요금 안내</span>
-                  </div>
-                  <span className="text-[10px] font-semibold text-[#D97757] bg-[#FAF0EB] px-1.5 py-0.5 rounded-md border border-[#F1D3C6]">
-                    Free / 플랜
-                  </span>
+                  <UserIcon className="w-4 h-4 stroke-[1.5px] text-[#6E6A63]" />
+                  <span className="text-xs font-normal">계정</span>
                 </button>
 
-                {/* 설정 */}
-                <div className="flex items-center gap-2 px-2.5 py-1.5 w-full hover:bg-[#F3EFE9] rounded-xl transition-colors text-[#4A4741] hover:text-[#2B2927] cursor-pointer">
-                  <button 
-                    onClick={() => setShowSettings(true)}
-                    className="flex items-center gap-2 flex-1 cursor-pointer text-left"
-                  >
-                    <Settings className="w-4 h-4 stroke-[1.5px] text-[#6E6A63]" />
-                    <span className="text-xs font-normal">설정</span>
-                  </button>
-                  <TooltipIcon text="캐쉬삭제: 기기용량확보를 위해 기기에 저장된 캐쉬를 삭제하세요. 구글드라이브, 악보 목록 및 설정 어디에도 영향주지 않고 보호됩니다." />
-                </div>
+                {/* 5. 네이션스 솔루션 & 1:1 문의 & 약관 푸터 */}
+                <div className="pt-2 border-t border-[#F0EBE1] px-1 space-y-1.5 text-[10px] text-[#A39E94]">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-medium text-[#7D786F] shrink-0">네이션스 솔루션</span>
+                    <a
+                      href="http://pf.kakao.com/_cxjBxaX/chat"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FEE500] hover:bg-[#FDD800] text-[#3C1E1E] text-[10px] font-bold rounded-full transition-all shadow-2xs active:scale-95 shrink-0 cursor-pointer"
+                      title="1:1 채팅 문의"
+                    >
+                      <svg className="w-2.5 h-2.5 stroke-[#3C1E1E] stroke-[2.8] fill-none shrink-0" viewBox="0 0 24 24">
+                        <path d="M12 3c-5.52 0-10 3.58-10 8 0 2.87 1.89 5.4 4.77 6.77l-1.2 4.43c-.11.41.34.75.7.53l5.24-3.48c.16.01.32.02.49.02 5.52 0 10-3.58 10-8s-4.48-8-10-8z" />
+                      </svg>
+                      <span>1:1 문의</span>
+                    </a>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[#8C877D] flex-wrap text-[10px]">
+                    <button
+                      type="button"
+                      onClick={() => setPolicyModal({ isOpen: true, tab: 'terms' })}
+                      className="hover:text-[#C46A40] hover:underline cursor-pointer"
+                    >
+                      이용약관
+                    </button>
+                    <span>•</span>
+                    <button
+                      type="button"
+                      onClick={() => setPolicyModal({ isOpen: true, tab: 'privacy' })}
+                      className="hover:text-[#C46A40] hover:underline cursor-pointer"
+                    >
+                      개인정보처리방침
+                    </button>
+                    <span>•</span>
+                    <button
+                      type="button"
+                      onClick={() => setPolicyModal({ isOpen: true, tab: 'business' })}
+                      className="hover:text-[#C46A40] hover:underline cursor-pointer"
+                    >
+                      사업자정보
+                    </button>
+                  </div>
 
-                <div className="pt-1 px-1 text-center">
-                  <p className="text-[10px] text-[#8C877D] font-medium tracking-wide">NATIONS ministry</p>
+                  <div className="flex items-center justify-between text-[9px] text-[#A39E94] pt-1 border-t border-[#F0EBE1]">
+                    <span className="font-mono text-[#8C877D]">v1.1</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      <span className="text-[#8C877D]">서버 최신 동기화</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -730,13 +802,44 @@ const MainApp: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* 클로드 스타일 전체화면 로그인 & 요금제 페이지 */}
+      {/* 클로드 스타일 전체화면 로그인 & 요금제 페이지 (랜딩 페이지) */}
       <ClaudeAuthPage
         isOpen={showAuthModal}
         initialSection={authPageSection}
         onClose={() => setShowAuthModal(false)}
         currentUser={auth.currentUser}
         userProfile={userProfile}
+      />
+
+      {/* 친구 초대 1+1 보너스 팝업 */}
+      <InviteBonusModal
+        isOpen={showInviteModal}
+        onClose={() => setShowInviteModal(false)}
+        currentUser={auth.currentUser}
+      />
+
+      {/* 계정 관리 모달 (SERMON 스타일 데이터 및 용량 현황) */}
+      <AccountModal
+        isOpen={showAccountModal}
+        onClose={() => setShowAccountModal(false)}
+        onOpenPricing={() => {
+          setAuthPageSection('pricing');
+          setShowAuthModal(true);
+        }}
+        currentUser={auth.currentUser}
+        userProfile={userProfile}
+        onLogout={async () => {
+          const { gdriveWebService } = await import('./api/gdriveWebService');
+          await gdriveWebService.logout();
+          window.location.reload();
+        }}
+      />
+
+      {/* 이용약관 및 개인정보처리방침/사업자정보 모달 */}
+      <PolicyViewModal
+        isOpen={policyModal.isOpen}
+        initialTab={policyModal.tab}
+        onClose={() => setPolicyModal(prev => ({ ...prev, isOpen: false }))}
       />
     </div>
   );

@@ -1,35 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   X,
-  Mail,
-  Lock,
-  Sparkles,
   CheckCircle2,
   AlertCircle,
-  ArrowRight,
-  KeyRound,
-  Eye,
-  EyeOff,
-  ChevronDown,
-  ChevronUp,
   Check,
   CreditCard,
   Send,
   ArrowLeft,
   Music,
-  Users,
-  FolderSync,
-  Share2,
-  Smartphone
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
-import {
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  updateProfile,
-  sendPasswordResetEmail,
-  type User
-} from 'firebase/auth';
+import { type User } from 'firebase/auth';
 import { auth } from '../api/firebaseConfig';
 import { startKakaoLogin, startNaverLogin, getRecentLoginProvider } from '../utils/socialAuth';
 import { PolicyViewModal, type PolicyModalType } from './PolicyViewModal';
@@ -51,16 +34,6 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
   currentUser,
   userProfile
 }) => {
-  // 로그인/회원가입 상태
-  const [tab, setTab] = useState<'login' | 'signup'>('login');
-  const [showEmailAuth, setShowEmailAuth] = useState(false);
-  const [isResetMode, setIsResetMode] = useState(false);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [passwordConfirm, setPasswordConfirm] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
-  const [displayName, setDisplayName] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -74,6 +47,57 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
     tab: 'terms'
   });
 
+  // 구글 계정 연결 안내 팝업 상태 (소셜 로그인 유저가 플랜 신청 시)
+  const [pendingGooglePlan, setPendingGooglePlan] = useState<string | null>(null);
+
+  // 최근 로그인 제공자 ('google' | 'kakao' | 'naver' | null)
+  const [recentProvider, setRecentProvider] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const p = getRecentLoginProvider();
+      if (p) setRecentProvider(p);
+    } catch {
+      // 무시
+    }
+  }, []);
+
+  // 6줄 순차 타이핑 효과 데이터 및 상태
+  const typingLines = [
+    { from: '매번 악보를 찾아요', to: '악보 라이브러리 저장' },
+    { from: '1장에 모아 출력해요', to: 'A4, A3 악보 자르기 편집' },
+    { from: '매번 유튜브 영상을 찾아요', to: '악보+유튜브 영상 클립 보관' },
+    { from: '가사와 코드를 찾아요', to: 'AI 가사, 코드 자동 생성' },
+    { from: '찬양팀 공유가 힘들어요', to: '콘티, 송폼, 유튜브 영상 원클릭 공유' },
+    { from: '매번 악보를 복사해요', to: '회중용 악보보기 링크제공' }
+  ];
+  const [displayedLengths, setDisplayedLengths] = useState<number[]>([0, 0, 0, 0, 0, 0]);
+
+  useEffect(() => {
+    let currentLine = 0;
+    let currentChar = 0;
+    const interval = setInterval(() => {
+      setDisplayedLengths(prev => {
+        const next = [...prev];
+        const line = typingLines[currentLine];
+        const maxLen = line ? line.from.length + 4 + line.to.length : 0;
+
+        if (currentChar <= maxLen) {
+          next[currentLine] = currentChar;
+          currentChar++;
+        } else {
+          if (currentLine < typingLines.length - 1) {
+            currentLine++;
+            currentChar = 0;
+          }
+        }
+        return next;
+      });
+    }, 40);
+
+    return () => clearInterval(interval);
+  }, []);
+
   // 섹션 참조 (요금제 바로 스크롤용)
   const pricingSectionRef = useRef<HTMLDivElement>(null);
   const loginSectionRef = useRef<HTMLDivElement>(null);
@@ -82,7 +106,7 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
   useEffect(() => {
     if (isOpen) {
       const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') onClose();
+        if (e.key === 'Escape' && effectiveUser) onClose();
       };
       window.addEventListener('keydown', handleKeyDown);
 
@@ -101,7 +125,7 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
     }
   }, [isOpen, initialSection]);
 
-  // 리다이렉트 로그인 결과 자동 감지 (구글 로그인 완료 후 복귀 시 자동 닫힘)
+  // 리다이렉트 로그인 결과 자동 감지 (구글 로그인 완료 후 복귀 시 자동 닫힘 및 결제 복귀)
   useEffect(() => {
     let isMounted = true;
     const checkRedirect = async () => {
@@ -109,8 +133,14 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
         const { processRedirectResult } = await import('../api/gdriveWebService');
         const restored = await processRedirectResult();
         if (restored && isMounted) {
-          if (onSuccess) onSuccess();
-          onClose();
+          const pending = sessionStorage.getItem('pending_plan_after_google');
+          sessionStorage.removeItem('pending_plan_after_google');
+          if (pending) {
+            proceedPayment(pending);
+          } else {
+            if (onSuccess) onSuccess();
+            onClose();
+          }
         }
       } catch (err: any) {
         console.warn('[ClaudeAuthPage] checkRedirect non-fatal:', err);
@@ -166,92 +196,68 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
     }
   };
 
-  // 비밀번호 재설정 발송
-  const handlePasswordReset = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email.trim()) {
-      setErrorMsg('비밀번호를 재설정할 이메일 주소를 입력해주세요.');
-      return;
-    }
-    setIsLoading(true);
-    setErrorMsg(null);
-    setSuccessMsg(null);
-    try {
-      await sendPasswordResetEmail(auth, email.trim());
-      setSuccessMsg('비밀번호 재설정 이메일이 발송되었습니다! 메일함(또는 스팸함)의 링크를 확인해주세요.');
-    } catch (err: any) {
-      console.error('[ClaudeAuthPage] Password reset error:', err);
-      if (err.code === 'auth/user-not-found') {
-        setErrorMsg('등록되지 않은 이메일 주소입니다.');
-      } else if (err.code === 'auth/invalid-email') {
-        setErrorMsg('올바른 이메일 형식이 아닙니다.');
-      } else {
-        setErrorMsg('이메일 발송 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // 이메일 로그인 / 회원가입
-  const handleEmailAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email.trim() || !password.trim()) {
-      setErrorMsg('이메일과 비밀번호를 모두 입력해주세요.');
-      return;
-    }
-    if (password.length < 6) {
-      setErrorMsg('비밀번호는 최소 6자 이상이어야 합니다.');
-      return;
-    }
-    if (tab === 'signup' && password !== passwordConfirm) {
-      setErrorMsg('비밀번호와 비밀번호 확인이 서로 일치하지 않습니다.');
-      return;
-    }
-
-    setIsLoading(true);
-    setErrorMsg(null);
-    setSuccessMsg(null);
-
-    try {
-      if (tab === 'signup') {
-        const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
-        if (displayName.trim()) {
-          await updateProfile(cred.user, { displayName: displayName.trim() });
-        }
-        alert('회원가입이 완료되었습니다! 환영합니다.');
-        if (onSuccess) onSuccess();
-        onClose();
-      } else {
-        await signInWithEmailAndPassword(auth, email.trim(), password);
-        if (onSuccess) onSuccess();
-        onClose();
-      }
-    } catch (err: any) {
-      console.error('[ClaudeAuthPage] Email auth error:', err);
-      if (err.code === 'auth/email-already-in-use') {
-        setErrorMsg('이미 등록된 이메일 주소입니다. 로그인을 진행해주세요.');
-      } else if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        setErrorMsg('이메일 또는 비밀번호가 일치하지 않습니다.');
-      } else if (err.code === 'auth/user-not-found') {
-        setErrorMsg('등록되지 않은 이메일입니다. 회원가입을 진행해주세요.');
-      } else if (err.code === 'auth/invalid-email') {
-        setErrorMsg('올바른 이메일 형식이 아닙니다.');
-      } else {
-        setErrorMsg('인증 중 오류가 발생했습니다. 다시 시도해주세요.');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // 플랜 액션 핸들러
-  const handlePlanAction = (planName: string, isFreePlan = false) => {
+  // 플랜 액션 핸들러 (카카오, 네이버의 경우 구글 계정 연결 모달을 먼저 띄움)
+  const handlePlanAction = async (planName: string, isFreePlan = false) => {
     if (isFreePlan) {
       onClose();
       return;
     }
 
+    // 현재 구글 드라이브 토큰이 있는지 확인
+    const gdriveToken = typeof window !== 'undefined' ? localStorage.getItem('gdrive_token') : null;
+    const isGoogleLinked = Boolean(gdriveToken && gdriveToken !== 'mock_local_token_123');
+
+    // 카카오 또는 네이버로 로그인되어 있고 구글 연동이 아직 안 된 경우 연결 모달 오픈
+    if (!isGoogleLinked) {
+      setPendingGooglePlan(planName);
+      return;
+    }
+
+    proceedPayment(planName);
+  };
+
+  // 플랜 신청 전 구글 계정 연결 핸들러
+  const handleConnectGoogleForPlan = async () => {
+    setIsLoading(true);
+    setErrorMsg(null);
+    try {
+      const { gdriveWebService, isMobileOrTabletDevice } = await import('../api/gdriveWebService');
+
+      if (isMobileOrTabletDevice()) {
+        if (pendingGooglePlan) {
+          sessionStorage.setItem('pending_plan_after_google', pendingGooglePlan);
+        }
+        await gdriveWebService.login();
+        return;
+      }
+
+      const success = await gdriveWebService.login();
+      if (success) {
+        await gdriveWebService.getNationsRootFolderId();
+        await gdriveWebService.getAppFolderId('Nations Studio');
+        setTimeout(() => window.dispatchEvent(new Event('gdrive_authenticated')), 500);
+        const targetPlan = pendingGooglePlan;
+        setPendingGooglePlan(null);
+        setIsLoading(false);
+        if (targetPlan) {
+          proceedPayment(targetPlan);
+        }
+      } else {
+        setErrorMsg('구글 인증이 완료되지 않았습니다.');
+        setIsLoading(false);
+      }
+    } catch (err: any) {
+      console.error('[ClaudeAuthPage] Google connect error:', err);
+      if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
+        setErrorMsg('로그인 창이 닫혔습니다.');
+      } else if (err.code !== 'auth/popup-blocked') {
+        setErrorMsg('구글 계정 연결 중 오류가 발생했습니다.');
+      }
+      setIsLoading(false);
+    }
+  };
+
+  const proceedPayment = (planName: string) => {
     const kakaoUrl = 'http://pf.kakao.com/_cxjBxaX/chat';
     if (confirm(`[${planName}]\n현재 카카오톡 1:1 상담 채널을 통해 플랜 신청 및 혜택 안내를 도와드리고 있습니다.\n상담 채널로 이동하시겠습니까?`)) {
       window.open(kakaoUrl, '_blank');
@@ -349,16 +355,18 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
               </div>
             )}
 
-            {/* 스튜디오로 돌아가기 (닫기) 버튼 */}
-            <button
-              onClick={onClose}
-              className="flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 bg-white hover:bg-[#F3EFE9] border border-[#DDD8CE] text-[#2C2B29] rounded-xl text-xs font-semibold shadow-2xs transition-all cursor-pointer"
-              title="악보 및 콘티 화면으로 돌아가기"
-            >
-              <ArrowLeft className="w-3.5 h-3.5 text-[#6E6A63]" />
-              <span>스튜디오로 돌아가기</span>
-              <X className="w-3.5 h-3.5 text-[#8C877D] ml-1" />
-            </button>
+            {/* 스튜디오로 돌아가기 (닫기) 버튼: 로그인된 상태에서만 표시 */}
+            {effectiveUser && (
+              <button
+                onClick={onClose}
+                className="flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 bg-white hover:bg-[#F3EFE9] border border-[#DDD8CE] text-[#2C2B29] rounded-xl text-xs font-semibold shadow-2xs transition-all cursor-pointer"
+                title="악보 및 콘티 화면으로 돌아가기"
+              >
+                <ArrowLeft className="w-3.5 h-3.5 text-[#6E6A63]" />
+                <span>스튜디오로 돌아가기</span>
+                <X className="w-3.5 h-3.5 text-[#8C877D] ml-1" />
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -386,9 +394,9 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
               <p><span className="font-bold text-[#1C1A18]">LIGHT</span> : 부담없어요! 무료로 시작하는 찬양팀 콘티</p>
             </div>
 
-            {/* 4줄 순차 타이핑 효과 영역 */}
-            <div className="mt-4 w-full sm:w-[405px] h-[126px] min-h-[126px] max-h-[126px] mx-auto rounded-2xl border border-[#DA7756]/40 bg-white/80 py-2.5 shadow-2xs flex flex-col justify-between items-center shrink-0 box-border overflow-hidden">
-              <div className="w-[260px] max-w-[90%] pl-2 flex flex-col justify-between h-full">
+            {/* 6줄 순차 타이핑 효과 영역 (모바일 및 데스크톱에서 글자 잘림 및 줄바꿈 없이 완벽 표시) */}
+            <div className="mt-4 w-full max-w-[620px] h-[195px] min-h-[195px] max-h-[195px] mx-auto rounded-2xl border border-[#DA7756]/35 bg-white/95 px-3 sm:px-5 py-3 shadow-2xs flex flex-col justify-between items-center shrink-0 box-border overflow-hidden">
+              <div className="w-full flex flex-col justify-between h-full">
                 {typingLines.map((item, idx) => {
                   const charCount = displayedLengths[idx];
                   const fromLen = item.from.length;
@@ -402,7 +410,7 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
                   return (
                     <div
                       key={idx}
-                      className="h-5 min-h-[20px] max-h-[20px] flex items-center justify-start gap-2 font-medium text-[12px] sm:text-[13px] text-[#2C2B29] whitespace-nowrap overflow-hidden"
+                      className="h-5 min-h-[20px] max-h-[20px] flex items-center justify-start gap-1 sm:gap-2 font-medium text-[10.5px] xs:text-[11.5px] sm:text-[12.5px] text-[#2C2B29] whitespace-nowrap"
                     >
                       <span
                         className={`shrink-0 flex items-center justify-center w-3.5 h-3.5 rounded-full transition-all ${
@@ -412,7 +420,7 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
                         <Check className="w-2 h-2 stroke-[3px]" />
                       </span>
 
-                      <span className="font-sans tracking-tight text-[#3A3834]">
+                      <span className="font-sans tracking-tight text-[#5A5751] shrink-0">
                         {fromText}
                       </span>
 
@@ -422,10 +430,10 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
                             viewBox="0 0 24 24"
                             fill="none"
                             stroke="currentColor"
-                            strokeWidth="2.2"
+                            strokeWidth="2.4"
                             strokeLinecap="round"
                             strokeLinejoin="round"
-                            className="w-4 h-4 inline-block"
+                            className="w-3.5 h-3.5 inline-block"
                           >
                             <line x1="3" y1="12" x2="20" y2="12" />
                             <polyline points="15 7 20 12 15 17" />
@@ -434,7 +442,7 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
                       )}
 
                       {toTypedCount > 0 && (
-                        <span className="font-semibold text-[#1C1A18] tracking-tight">
+                        <span className="font-semibold text-[#1C1A18] tracking-tight shrink-0">
                           {toText}
                         </span>
                       )}
@@ -495,8 +503,20 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
                 </div>
               </div>
             ) : (
-              /* 비로그인 시: Google 및 이메일 로그인 카드 */
+              /* 비로그인 시: 무료로 이용하기 (Google, 카카오, 네이버) 로그인 카드 */
               <div className="flex flex-col gap-4">
+                <div className="text-center pb-1">
+                  <h3 className="font-bold text-base text-[#1C1A18]">
+                    무료로 이용하기
+                  </h3>
+                  <p className="text-xs text-[#6E6A63] mt-1 font-medium">
+                    (악보 라이브러리를 이용하기 위해 구글로 로그인)
+                  </p>
+                  <p className="text-[11px] text-[#8C877D] mt-0.5">
+                    카카오, 네이버로 로그인한 경우 구글 계정과 연결하셔야 합니다.
+                  </p>
+                </div>
+
                 {/* 1. 구글로 계속하기 버튼 */}
                 <button
                   onClick={handleGoogleLogin}
@@ -550,231 +570,6 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
                     </span>
                   )}
                 </button>
-
-                {/* 2. 구분선 '또는' */}
-                <div className="relative flex items-center justify-center my-1">
-                  <div className="border-t border-[#E8E5DE] w-full" />
-                  <span className="bg-white px-3 text-xs text-[#8C877D] font-normal shrink-0">
-                    또는
-                  </span>
-                </div>
-
-                {/* 3. 이메일로 계속하기 버튼 */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowEmailAuth(!showEmailAuth);
-                    setErrorMsg(null);
-                    setSuccessMsg(null);
-                  }}
-                  className="w-full py-3.5 px-4 bg-[#2C2B29] hover:bg-[#1A1918] active:bg-black text-white rounded-2xl font-semibold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs"
-                >
-                  <Mail className="w-4 h-4 text-white/80" />
-                  <span>이메일로 계속하기</span>
-                  {showEmailAuth ? (
-                    <ChevronUp className="w-3.5 h-3.5 text-white/80" />
-                  ) : (
-                    <ChevronDown className="w-3.5 h-3.5 text-white/80" />
-                  )}
-                </button>
-
-                {/* 4. 이메일 폼 상세 영역 */}
-                {showEmailAuth && (
-                  <div className="flex flex-col gap-3 pt-2">
-                    {isResetMode ? (
-                      <div className="flex flex-col gap-3 bg-[#FAF9F5] p-4 rounded-2xl border border-[#E8E5DE]">
-                        <div className="flex items-center gap-2 text-[#2C2B29]">
-                          <KeyRound className="w-4 h-4 text-[#C46A40]" />
-                          <h4 className="font-bold text-xs">비밀번호 재설정 링크 발송</h4>
-                        </div>
-                        <p className="text-[11px] text-[#6E6A63] leading-relaxed">
-                          가입하신 이메일 주소를 입력하시면 비밀번호를 안전하게 재설정할 수 있는 링크를 보내드립니다.
-                        </p>
-
-                        {errorMsg && (
-                          <div className="p-2.5 bg-red-50 border border-red-200 text-red-600 rounded-xl text-xs flex items-center gap-2">
-                            <AlertCircle className="w-4 h-4 shrink-0" />
-                            <span>{errorMsg}</span>
-                          </div>
-                        )}
-                        {successMsg && (
-                          <div className="p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl text-xs flex items-center gap-2">
-                            <CheckCircle2 className="w-4 h-4 shrink-0" />
-                            <span>{successMsg}</span>
-                          </div>
-                        )}
-
-                        <form onSubmit={handlePasswordReset} className="flex flex-col gap-2.5">
-                          <input
-                            type="email"
-                            placeholder="가입 이메일 주소"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            className="w-full bg-white border border-[#DDD8CE] rounded-xl px-3.5 py-2 text-xs text-[#2C2B29] outline-none focus:border-[#C46A40]"
-                            required
-                          />
-                          <div className="flex gap-2">
-                            <button
-                              type="submit"
-                              disabled={isLoading}
-                              className="flex-1 py-2 bg-[#2C2B29] hover:bg-[#1A1918] text-white rounded-xl text-xs font-semibold transition-all cursor-pointer disabled:opacity-50"
-                            >
-                              발송하기
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsResetMode(false);
-                                setErrorMsg(null);
-                                setSuccessMsg(null);
-                              }}
-                              className="px-3 py-2 bg-white border border-[#DDD8CE] text-[#6E6A63] rounded-xl text-xs font-medium cursor-pointer"
-                            >
-                              취소
-                            </button>
-                          </div>
-                        </form>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="flex bg-[#F0EEE6] p-1 rounded-xl">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setTab('login');
-                              setPasswordConfirm('');
-                              setErrorMsg(null);
-                              setSuccessMsg(null);
-                            }}
-                            className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                              tab === 'login' ? 'bg-white text-[#2C2B29] shadow-2xs' : 'text-[#8C877D] hover:text-[#2C2B29]'
-                            }`}
-                          >
-                            로그인
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setTab('signup');
-                              setPasswordConfirm('');
-                              setErrorMsg(null);
-                              setSuccessMsg(null);
-                            }}
-                            className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                              tab === 'signup' ? 'bg-white text-[#2C2B29] shadow-2xs' : 'text-[#8C877D] hover:text-[#2C2B29]'
-                            }`}
-                          >
-                            간편 회원가입
-                          </button>
-                        </div>
-
-                        {errorMsg && (
-                          <div className="p-2.5 bg-red-50 border border-red-200 text-red-600 rounded-xl text-xs flex items-center gap-2">
-                            <AlertCircle className="w-4 h-4 shrink-0" />
-                            <span>{errorMsg}</span>
-                          </div>
-                        )}
-
-                        <form onSubmit={handleEmailAuth} className="flex flex-col gap-2.5">
-                          {tab === 'signup' && (
-                            <div>
-                              <label className="block text-[11px] font-semibold text-[#6E6A63] mb-1">
-                                이름 <span className="text-[#C46A40]">(사역자/이용자명)</span>
-                              </label>
-                              <input
-                                type="text"
-                                placeholder="홍길동"
-                                value={displayName}
-                                onChange={(e) => setDisplayName(e.target.value)}
-                                className="w-full bg-[#FAF9F5] border border-[#DDD8CE] rounded-xl px-3.5 py-2 text-xs text-[#2C2B29] outline-none focus:border-[#C46A40]"
-                                required
-                              />
-                            </div>
-                          )}
-
-                          <div>
-                            <label className="block text-[11px] font-semibold text-[#6E6A63] mb-1">이메일</label>
-                            <input
-                              type="email"
-                              placeholder="user@example.com"
-                              value={email}
-                              onChange={(e) => setEmail(e.target.value)}
-                              className="w-full bg-[#FAF9F5] border border-[#DDD8CE] rounded-xl px-3.5 py-2 text-xs text-[#2C2B29] outline-none focus:border-[#C46A40]"
-                              required
-                            />
-                          </div>
-
-                          <div>
-                            <div className="flex items-center justify-between mb-1">
-                              <label className="block text-[11px] font-semibold text-[#6E6A63]">비밀번호</label>
-                              {tab === 'login' && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setIsResetMode(true);
-                                    setErrorMsg(null);
-                                  }}
-                                  className="text-[10px] text-[#C46A40] hover:underline cursor-pointer"
-                                >
-                                  비밀번호 찾기
-                                </button>
-                              )}
-                            </div>
-                            <div className="relative">
-                              <input
-                                type={showPassword ? 'text' : 'password'}
-                                placeholder="••••••••"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                className="w-full bg-[#FAF9F5] border border-[#DDD8CE] rounded-xl px-3.5 py-2 pr-9 text-xs text-[#2C2B29] outline-none focus:border-[#C46A40]"
-                                required
-                              />
-                              <button
-                                type="button"
-                                onClick={() => setShowPassword(!showPassword)}
-                                className="absolute right-2.5 top-2.5 text-[#8C877D] hover:text-[#2C2B29]"
-                              >
-                                {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                              </button>
-                            </div>
-                          </div>
-
-                          {tab === 'signup' && (
-                            <div>
-                              <label className="block text-[11px] font-semibold text-[#6E6A63] mb-1">비밀번호 확인</label>
-                              <div className="relative">
-                                <input
-                                  type={showPasswordConfirm ? 'text' : 'password'}
-                                  placeholder="••••••••"
-                                  value={passwordConfirm}
-                                  onChange={(e) => setPasswordConfirm(e.target.value)}
-                                  className="w-full bg-[#FAF9F5] border border-[#DDD8CE] rounded-xl px-3.5 py-2 pr-9 text-xs text-[#2C2B29] outline-none focus:border-[#C46A40]"
-                                  required
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => setShowPasswordConfirm(!showPasswordConfirm)}
-                                  className="absolute right-2.5 top-2.5 text-[#8C877D] hover:text-[#2C2B29]"
-                                >
-                                  {showPasswordConfirm ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                                </button>
-                              </div>
-                            </div>
-                          )}
-
-                          <button
-                            type="submit"
-                            disabled={isLoading}
-                            className="mt-1 w-full py-2.5 bg-[#2C2B29] hover:bg-[#1A1918] text-white rounded-xl text-xs font-semibold transition-all shadow-2xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-                          >
-                            <span>{tab === 'login' ? '이메일로 로그인' : '가입 완료하기'}</span>
-                            <ArrowRight className="w-3.5 h-3.5" />
-                          </button>
-                        </form>
-                      </>
-                    )}
-                  </div>
-                )}
 
                 {/* 5. 법적 고지 */}
                 <div className="pt-2 text-center">
@@ -841,33 +636,40 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
                   <ul className="text-xs text-[#6E6A63] space-y-2.5">
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#8C877D] shrink-0 mt-0.5" />
-                      <span>예배 콘티 작성</span>
+                      <span>앨범, 콘티 1개 제공</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#8C877D] shrink-0 mt-0.5" />
-                      <span>악보 수정 및 콘티 프린트</span>
+                      <span>악보마다 유튜브영상 클립 저장</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#8C877D] shrink-0 mt-0.5" />
-                      <span>콘티 악보 찬양팀, 회중 링크 공유</span>
+                      <span>악보 수정 및 A4, A3 프린트</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#8C877D] shrink-0 mt-0.5" />
-                      <span>개인 기기 로컬 저장</span>
+                      <span>모든 기기 연동</span>
                     </li>
                   </ul>
                 </div>
               </div>
             </div>
 
-            {/* 2. SOLO 플랜 */}
+            {/* 2. SOLO 플랜 (찬양인도자용) */}
             <div className="bg-white border border-[#E8E5DE] rounded-3xl p-6 sm:p-7 flex flex-col justify-between shadow-2xs hover:shadow-xs transition-shadow">
               <div>
-                <h3 className="text-xl font-bold text-[#1A1918] mb-4">SOLO 플랜</h3>
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="text-xl font-bold text-[#1A1918]">SOLO 플랜</h3>
+                  <span className="text-[11px] text-[#DA7756] font-semibold bg-[#FAF0EB] px-2 py-0.5 rounded-full border border-[#F1D3C6]">찬양인도자용</span>
+                </div>
+                <p className="text-xs text-[#8C877D] mb-4">개인 찬양인도자를 위한 완벽한 콘티 솔루션</p>
 
                 <div className="mb-6">
-                  <div className="text-3xl font-serif font-bold text-[#2C2B29]">₩15,000</div>
-                  <div className="text-xs text-[#8C877D] mt-0.5">월간 이용권</div>
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-3xl font-serif font-bold text-[#2C2B29]">₩3,900</span>
+                    <span className="text-xs text-[#8C877D]">/ 월</span>
+                  </div>
+                  <div className="text-xs text-[#DA7756] font-medium mt-0.5">연간 ₩39,000 (약 17% 절약)</div>
                 </div>
 
                 <button
@@ -878,15 +680,15 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
                 </button>
 
                 <div className="border-t border-[#EFECE6] pt-4">
-                  <span className="text-[11px] font-bold text-[#5A564F] block mb-2.5">Free플랜 + 포함된 혜택:</span>
+                  <span className="text-[11px] font-bold text-[#5A564F] block mb-2.5">포함된 혜택:</span>
                   <ul className="text-xs text-[#6E6A63] space-y-2.5">
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
-                      <span>구글 드라이브 자동 동기화</span>
+                      <span>구글 드라이브 앨범 동기화</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
-                      <span>찬양 앨범 추가 기능</span>
+                      <span>앨범 라이브러리 기능</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
@@ -894,28 +696,35 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
                     </li>
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
-                      <span>악보 마다 카피곡 유튜브 링크 저장</span>
+                      <span>인도자용 악보보기 기능</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
-                      <span>모든 기기에서 악보, 콘티 실시간 연동</span>
+                      <span>회중용 악보보기 링크전송</span>
                     </li>
                   </ul>
                 </div>
               </div>
             </div>
 
-            {/* 3. TEAM 플랜 (추천 플랜) */}
+            {/* 3. TEAM 플랜 (찬양팀을 운영하는 리더, 팀장 / 추천 플랜) */}
             <div className="bg-white border-2 border-[#D97757] rounded-3xl p-6 sm:p-7 flex flex-col justify-between shadow-md relative">
               <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#D97757] text-white px-3 py-0.5 rounded-full text-[10px] font-bold tracking-wide shadow-2xs">
                 추천 플랜
               </div>
               <div>
-                <h3 className="text-xl font-bold text-[#1A1918] mb-4">TEAM 플랜</h3>
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="text-xl font-bold text-[#1A1918]">TEAM 플랜</h3>
+                  <span className="text-[11px] text-[#C46A40] font-semibold bg-[#FAF0EB] px-2 py-0.5 rounded-full border border-[#F1D3C6]">리더 · 팀장용</span>
+                </div>
+                <p className="text-xs text-[#8C877D] mb-4">찬양팀을 운영하는 리더와 팀원을 위한 원스톱 협업</p>
 
                 <div className="mb-6">
-                  <div className="text-3xl font-serif font-bold text-[#C46A40]">₩25,000</div>
-                  <div className="text-xs text-[#8C877D] mt-0.5">월간 이용권</div>
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-3xl font-serif font-bold text-[#C46A40]">₩9,900</span>
+                    <span className="text-xs text-[#8C877D]">/ 월</span>
+                  </div>
+                  <div className="text-xs text-[#DA7756] font-medium mt-0.5">연간 ₩99,000 (약 17% 절약)</div>
                 </div>
 
                 <button
@@ -926,19 +735,27 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
                 </button>
 
                 <div className="border-t border-[#EFECE6] pt-4">
-                  <span className="text-[11px] font-bold text-[#5A564F] block mb-2.5">SOLO 플랜+포함된 혜택:</span>
+                  <span className="text-[11px] font-bold text-[#5A564F] block mb-2.5">+ SOLO 플랜 포함된 혜택:</span>
                   <ul className="text-xs text-[#6E6A63] space-y-2.5">
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
-                      <span>찬양팀 공유 기능</span>
+                      <span>찬양팀 공유기능 확장</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
-                      <span>찬양팀 악보, 송폼 공유</span>
+                      <span>찬양팀 전용페이지</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
-                      <span>찬양팀 톡 교제</span>
+                      <span>송폼, 악보, 카피곡 유튜브영상 공유</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
+                      <span>연습중 수정기능</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
+                      <span>찬양팀 톡 교제기능</span>
                     </li>
                   </ul>
                 </div>
@@ -1188,12 +1005,14 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
               >
                 개인정보처리방침
               </button>
-              <button
-                onClick={onClose}
-                className="text-[#2C2B29] font-bold hover:underline cursor-pointer"
-              >
-                스튜디오로 복귀 →
-              </button>
+              {effectiveUser && (
+                <button
+                  onClick={onClose}
+                  className="text-[#2C2B29] font-bold hover:underline cursor-pointer"
+                >
+                  스튜디오로 복귀 →
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1205,6 +1024,93 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
         initialTab={policyModal.tab}
         onClose={() => setPolicyModal({ isOpen: false, tab: 'terms' })}
       />
+
+      {/* 구글 계정 연결 모달 (소셜 로그인 또는 미연동 사용자가 플랜 신청 시 표시) */}
+      {pendingGooglePlan && (
+        <div className="fixed inset-0 z-[120] bg-black/65 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white text-[#111111] border border-neutral-300 rounded-2xl max-w-md w-full p-6 sm:p-7 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
+            {/* 닫기 버튼 */}
+            <button
+              onClick={() => {
+                setPendingGooglePlan(null);
+                setErrorMsg(null);
+              }}
+              className="absolute top-4 right-4 text-neutral-400 hover:text-black transition-colors p-1 rounded-lg cursor-pointer"
+              title="닫기"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* 헤더 */}
+            <div className="mb-4">
+              <h3 className="text-lg font-bold text-[#111111] tracking-tight">
+                구글 계정 연결
+              </h3>
+              <p className="text-xs text-neutral-500 mt-1 leading-relaxed">
+                <span className="font-semibold text-black">[{pendingGooglePlan}]</span> 이용을 위해 악보 라이브러리 연동이 필요합니다.
+              </p>
+            </div>
+
+            {/* 안내 내용 박스 (모노톤 & 심플) */}
+            <div className="bg-[#F8F8F8] border border-neutral-200 rounded-xl p-4 mb-5 text-xs text-neutral-700 space-y-2.5">
+              <p className="leading-relaxed">
+                Nations Studio의 악보 라이브러리 및 콘티 저장 기능은 사용자 개인의 <strong className="text-black font-semibold">구글 드라이브(무료)</strong>에 안전하게 설치 및 보관됩니다.
+              </p>
+              <div className="pt-2 border-t border-neutral-200/80 text-[11px] text-neutral-600 space-y-1">
+                <div className="flex items-start gap-1.5">
+                  <span className="text-neutral-400">•</span>
+                  <span><strong className="text-neutral-900 font-medium">설치 위치:</strong> 내 구글 드라이브 &gt; Nations Solution &gt; Nations Studio</span>
+                </div>
+                <div className="flex items-start gap-1.5">
+                  <span className="text-neutral-400">•</span>
+                  <span><strong className="text-neutral-900 font-medium">보관 내용:</strong> 찬양 앨범, 악보 이미지, 콘티 및 송폼 데이터</span>
+                </div>
+              </div>
+            </div>
+
+            {errorMsg && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-600">
+                {errorMsg}
+              </div>
+            )}
+
+            {/* 버튼 액션 */}
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={handleConnectGoogleForPlan}
+                disabled={isLoading}
+                className="w-full py-3.5 bg-[#111111] hover:bg-black active:bg-neutral-900 text-white rounded-xl font-bold text-xs sm:text-sm transition-colors cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50 shadow-xs"
+              >
+                {isLoading ? (
+                  <span>연결 중...</span>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                    </svg>
+                    <span>구글 계정 연결하고 결제 진행하기</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingGooglePlan(null);
+                  setErrorMsg(null);
+                }}
+                className="w-full py-2.5 text-neutral-500 hover:text-black text-xs font-medium transition-colors cursor-pointer text-center"
+              >
+                다음에 하기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
