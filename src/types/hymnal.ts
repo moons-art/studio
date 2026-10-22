@@ -12,6 +12,7 @@ export interface HymnalSong {
   youtubeVideos?: { name: string; url: string; isShared?: boolean }[];
   isManual?: boolean;
   songForm?: string; // 송폼 (예: Intro - V1 - C - Bridge - Outro)
+  fileSize?: number; // 악보 이미지 실제 바이트 크기 (예: 142500)
 }
 
 export interface HymnalState {

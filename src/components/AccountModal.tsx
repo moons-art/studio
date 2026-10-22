@@ -34,7 +34,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   userProfile,
   onLogout
 }) => {
-  const { albums, songs, savedContis } = useHymnal();
+  const { albums, songs, savedContis, isSyncing } = useHymnal();
   const [cacheSize, setCacheSize] = useState<string>('계산 중...');
   const [sharedContisCount, setSharedContisCount] = useState<number>(0);
   const [copiedLink, setCopiedLink] = useState(false);
@@ -84,9 +84,9 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   const email = currentUser?.email || userProfile?.email || '소셜 로그인 계정';
   const photo = currentUser?.photoURL || userProfile?.picture;
 
-  // 통계 계산
-  const albumCount = albums.length;
-  const songCount = songs.length;
+  // 통계 계산 (찬송가 앨범과 645곡은 모든 카운터에서 완전 제외하여 순수 사용자 악보/앨범만 집계)
+  const albumCount = albums.filter(a => a.id !== 'hymnal').length;
+  const songCount = songs.filter(s => s.albumId !== 'hymnal').length;
   const contiCount = savedContis.length;
 
   // 무료 플랜일 경우 제한
@@ -111,7 +111,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
 
   // 기기 캐시 지우기 핸들러
   const handleClearCache = async () => {
-    if (window.confirm('기기에 임시 저장된 악보 이미지 캐시를 지우시겠습니까?\n구글 드라이브 및 원본 악보 데이터는 안전하게 보관됩니다.')) {
+    if (window.confirm('기기에 임시 저장된 악보 이미지 캐시를 지우시겠습니까?\n네이션스 스튜디오 클라우드 및 원본 악보 데이터는 안전하게 보관됩니다.')) {
       try {
         if ('caches' in window) {
           const keys = await caches.keys();
@@ -129,6 +129,10 @@ export const AccountModal: React.FC<AccountModalProps> = ({
 
   // 계정 삭제 핸들러
   const handleDeleteAccount = async () => {
+    if (isSyncing) {
+      alert('악보 업로드가 진행 중입니다. 업로드가 완료된 후 진행해 주세요.');
+      return;
+    }
     const confirm1 = window.confirm(
       '정말로 계정을 삭제하시겠습니까?\n계정의 모든 캐시 데이터와 로그인 정보가 삭제됩니다.'
     );
@@ -309,10 +313,10 @@ export const AccountModal: React.FC<AccountModalProps> = ({
               <div className="space-y-2">
                 <div className="text-[11px] font-semibold text-[#7D786F]">앨범 목록 및 악보 수</div>
                 <div className="bg-white border border-[#EAE8E1] rounded-xl p-3 divide-y divide-[#F0EBE1] max-h-40 overflow-y-auto custom-scrollbar">
-                  {albums.length === 0 ? (
+                  {albums.filter(album => album.id !== 'hymnal').length === 0 ? (
                     <div className="py-2 text-center text-[#8C877D] text-[11px]">생성된 앨범이 없습니다.</div>
                   ) : (
-                    albums.map(album => {
+                    albums.filter(album => album.id !== 'hymnal').map(album => {
                       const count = songs.filter(s => (s as any).albumId === album.id).length;
                       return (
                         <div key={album.id} className="py-1.5 first:pt-0 last:pb-0 flex items-center justify-between">
@@ -358,7 +362,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                 </div>
                 <p className="text-[11px] text-[#6E6A63] leading-relaxed">
                   악보 이미지를 빠르게 표시하기 위해 기기에 임시 보관된 데이터를 정리합니다.
-                  구글 드라이브와 콘티 원본 데이터는 안전하게 보존되며, 용량 확보가 필요할 때 안심하고 실행하셔도 됩니다.
+                  네이션스 스튜디오 클라우드와 콘티 원본 데이터는 안전하게 보존되며, 용량 확보가 필요할 때 안심하고 실행하셔도 됩니다.
                 </p>
               </div>
 
@@ -427,8 +431,14 @@ export const AccountModal: React.FC<AccountModalProps> = ({
 
               <button
                 type="button"
+                disabled={isSyncing}
                 onClick={handleDeleteAccount}
-                className="shrink-0 px-3.5 py-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-xs font-bold transition-all cursor-pointer"
+                className={`shrink-0 px-3.5 py-2 rounded-xl border text-xs font-bold transition-all ${
+                  isSyncing 
+                    ? 'border-neutral-200 text-neutral-400 bg-neutral-100 cursor-not-allowed opacity-50'
+                    : 'border-red-200 text-red-600 hover:bg-red-50 cursor-pointer'
+                }`}
+                title={isSyncing ? "악보 업로드 중에는 계정을 삭제할 수 없습니다." : "계정 삭제"}
               >
                 계정 삭제
               </button>

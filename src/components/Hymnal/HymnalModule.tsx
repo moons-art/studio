@@ -21,7 +21,10 @@ import {
   PlayCircle as Youtube,
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon,
-  HelpCircle
+  HelpCircle,
+  Download,
+  Upload,
+  FileSpreadsheet
 } from 'lucide-react';
 import { logActivity } from '../../utils/logger';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -42,8 +45,8 @@ const DriveImage = ({ fileId, alt, className }: { fileId: string, alt?: string, 
       return;
     }
     
-    // Check if it's already a full URL or local path
-    if (fileId.startsWith('http') || fileId.startsWith('/')) {
+    // Check if it's already a full URL, Data URL, Blob URL or local path
+    if (fileId.startsWith('http') || fileId.startsWith('/') || fileId.startsWith('data:') || fileId.startsWith('blob:')) {
       setSrc(fileId);
       return;
     }
@@ -122,7 +125,9 @@ export const HymnalModule: React.FC = () => {
       savedContis,
       loadSavedConti,
       deleteSavedConti,
-      clearConti
+      clearConti,
+      exportCSV,
+      importCSV
     } = useHymnal();
   
     // --- 글로벌 진행 바 추가 ---
@@ -164,6 +169,8 @@ export const HymnalModule: React.FC = () => {
   const [showYoutubePlayer, setShowYoutubePlayer] = useState(false);
   const [isListOpen, setIsListOpen] = useState(true);
   const [visibleCount, setVisibleCount] = useState(50);
+  const [swipedSongId, setSwipedSongId] = useState<string | null>(null);
+  const [isDraggingSong, setIsDraggingSong] = useState(false);
 
   // 검색어나 앨범이 변경되면 리스트 표시 개수 초기화
   useEffect(() => {
@@ -280,28 +287,40 @@ export const HymnalModule: React.FC = () => {
     }
   };
 
-  const handleDeleteSong = async () => {
-    if (!selectedSongId) return;
-    
-    const warningMsg = '정말로 이 악보를 삭제하시겠습니까? PC 원본 파일 및 구글 드라이브 파일도 함께 삭제됩니다.';
-      
+  const executeDeleteSong = async (songToDelete: HymnalSong) => {
+    if ((songToDelete as any).albumId === 'hymnal') {
+      alert('새찬송가 악보는 기본 악보이므로 삭제할 수 없습니다.');
+      return;
+    }
+
+    const warningMsg = `'${songToDelete.title}' 악보를 삭제하시겠습니까?`;
     if (!confirm(warningMsg)) return;
 
-    // 1. 낙관적 UI 업데이트 (즉시 화면에서 제거)
-    const targetFileId = selectedSong?.fileId;
-    const targetSongId = selectedSongId;
-    
-    setSongs(prev => prev.filter(s => s.id !== targetSongId));
-    setSelectedSongId(null);
-    setIsEditing(false);
+    const targetFileId = (songToDelete as any)?.fileId;
+    const targetSongId = songToDelete.id;
 
-    // 2. 백그라운드에서 조용히 API 삭제 진행
-    hymnalApi.deleteSong(targetSongId, true, targetFileId).then(result => {
+    // 1. 낙관적 UI 업데이트 (즉시 화면에서 제거)
+    setSongs(prev => prev.filter(s => s.id !== targetSongId));
+    if (selectedSongId === targetSongId) {
+      setSelectedSongId(null);
+      setIsEditing(false);
+    }
+    setSwipedSongId(null);
+
+    const targetStorageUrl = (songToDelete as any)?.storageUrl || (songToDelete as any)?.filePath;
+
+    // 2. 백그라운드에서 API 삭제 진행 (DB, 로컬 캐시, 클라우드 스토리지 원본 완전 삭제)
+    hymnalApi.deleteSong(targetSongId, true, targetFileId, targetStorageUrl).then(result => {
       if (!result.success) {
         console.error('[HymnalModule] 백그라운드 삭제 실패:', result.error);
-        // 필요하다면 실패 시 alert 띄우고 fetchSongs()로 롤백 가능
       }
     });
+    logActivity('악보 삭제', `${songToDelete.title} 악보 삭제`);
+  };
+
+  const handleDeleteSong = async () => {
+    if (!selectedSong) return;
+    executeDeleteSong(selectedSong);
   };
 
   return (
@@ -351,34 +370,81 @@ export const HymnalModule: React.FC = () => {
                         <TooltipIcon text="악보이미지를 처음 볼때와 캐쉬를 삭제한 후, 약간의 로딩시간이 있습니다. 다음부터는 속도가 빨라집니다." />
                       </div>
                     </div>
-                    {filteredSongs.slice(0, visibleCount).map((song) => (
-                      <button
-                        key={song.id}
-                        onClick={() => setSelectedSongId(song.id)}
-                        className={`w-full flex items-center gap-2.5 p-2.5 rounded-xl transition-all group cursor-pointer text-left ${
-                          selectedSongId === song.id 
-                            ? 'bg-white text-[#2C2B29] shadow-xs border border-[#F1D3C6] ring-1 ring-[#FAF0EB]' 
-                            : 'hover:bg-white/80 hover:shadow-2xs text-[#6A6864] hover:text-[#2C2B29] border border-transparent hover:border-[#E7E5DF]'
-                        }`}
-                      >
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs transition-colors shrink-0 ${
-                          selectedSongId === song.id ? 'bg-[#C96442] text-white shadow-2xs' : 'bg-[#F5F3ED] text-[#A3A19B] group-hover:bg-[#FAF0EB] group-hover:text-[#C96442]'
-                        }`}>
-                          {song.number}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <p className="text-xs font-semibold truncate leading-tight">{song.title}</p>
-                            {song.category && (
-                              <span className="text-[9px] px-1.5 py-0.5 bg-[#F5F3ED] text-[#6A6864] rounded-md font-medium border border-[#E7E5DF] shrink-0">
-                                {song.category}
-                              </span>
-                            )}
+                    {filteredSongs.slice(0, visibleCount).map((song) => {
+                      const isSwiped = swipedSongId === song.id;
+                      const isSelected = selectedSongId === song.id;
+
+                      return (
+                        <div key={song.id} className="relative overflow-hidden rounded-xl bg-black select-none">
+                          {/* 뒤편 배경: 검은색 삭제 버튼 */}
+                          <div className="absolute inset-y-0 right-0 w-[76px] bg-black flex items-center justify-center z-0">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                executeDeleteSong(song);
+                              }}
+                              className="w-full h-full flex flex-col items-center justify-center gap-1 text-white hover:bg-neutral-900 active:bg-neutral-800 transition-colors cursor-pointer"
+                              title="악보 삭제"
+                            >
+                              <Trash2 className="w-4 h-4 text-white stroke-[2px]" />
+                              <span className="text-[11px] font-bold tracking-tight">삭제</span>
+                            </button>
                           </div>
-                          <p className="text-[10px] text-[#A3A19B] font-normal truncate mt-0.5">{song.lyrics}</p>
+
+                          {/* 전면 카드: 가로 드래그로 왼쪽으로 밀면 뒤의 삭제 버튼 노출 */}
+                          <motion.div
+                            drag="x"
+                            dragConstraints={{ left: -76, right: 0 }}
+                            dragElastic={0.08}
+                            animate={{ x: isSwiped ? -76 : 0 }}
+                            transition={{ type: "spring", stiffness: 400, damping: 32 }}
+                            onDragStart={() => setIsDraggingSong(true)}
+                            onDragEnd={(_, info) => {
+                              setTimeout(() => setIsDraggingSong(false), 80);
+                              if (info.offset.x < -28 || info.velocity.x < -180) {
+                                setSwipedSongId(song.id);
+                              } else {
+                                setSwipedSongId(null);
+                              }
+                            }}
+                            onClick={() => {
+                              if (isDraggingSong) return;
+                              if (isSwiped) {
+                                setSwipedSongId(null);
+                                return;
+                              }
+                              if (swipedSongId) {
+                                setSwipedSongId(null);
+                              }
+                              setSelectedSongId(song.id);
+                            }}
+                            className={`relative z-10 w-full flex items-center gap-2.5 p-2.5 rounded-xl transition-colors cursor-pointer text-left ${
+                              isSelected 
+                                ? 'bg-white text-[#2C2B29] shadow-xs border border-[#F1D3C6] ring-1 ring-[#FAF0EB]' 
+                                : 'bg-white hover:bg-white/95 text-[#6A6864] hover:text-[#2C2B29] border border-transparent hover:border-[#E7E5DF]'
+                            }`}
+                          >
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs transition-colors shrink-0 ${
+                              isSelected ? 'bg-[#C96442] text-white shadow-2xs' : 'bg-[#F5F3ED] text-[#A3A19B] group-hover:bg-[#FAF0EB] group-hover:text-[#C96442]'
+                            }`}>
+                              {song.number}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <p className="text-xs font-semibold truncate leading-tight">{song.title}</p>
+                                {song.category && (
+                                  <span className="text-[9px] px-1.5 py-0.5 bg-[#F5F3ED] text-[#6A6864] rounded-md font-medium border border-[#E7E5DF] shrink-0">
+                                    {song.category}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-[#A3A19B] font-normal truncate mt-0.5">{song.lyrics}</p>
+                            </div>
+                          </motion.div>
                         </div>
-                      </button>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="py-20 text-center">

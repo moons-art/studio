@@ -93,8 +93,14 @@ const DraggableContiItem = React.memo(({
     let currentUrl: string | null = null;
     const fileId = song?.fileId || song?.filePath || song?.filename;
     
-    // 구글 드라이브 ID는 보통 20자 이상. 로컬 경로나 번호가 아닐 때만 시도
-    if (fileId && fileId.length > 20 && !fileId.startsWith('/')) {
+    // HTTP URL, Data URL, Blob URL 또는 로컬 경로인 경우 즉시 직접 사용
+    if (fileId && (fileId.startsWith('http') || fileId.startsWith('data:') || fileId.startsWith('blob:') || fileId.startsWith('/'))) {
+      setBlobUrl(fileId);
+      return;
+    }
+    
+    // 구글 드라이브 ID인 경우에만 다운로드 시도
+    if (fileId && fileId.length > 20) {
       import('../../api/gdriveWebService').then(({ gdriveWebService }) => {
         gdriveWebService.downloadImageBlob(fileId).then(url => {
           if (isMounted && url) {
@@ -283,7 +289,13 @@ const CropEditor: React.FC<{
     let isMounted = true;
     const fileId = song?.fileId || song?.filePath || song?.filename;
     
-    if (fileId && fileId.length > 20 && !fileId.startsWith('/')) {
+    // HTTP URL, Data URL, Blob URL 또는 로컬 경로인 경우 즉시 직접 사용
+    if (fileId && (fileId.startsWith('http') || fileId.startsWith('data:') || fileId.startsWith('blob:') || fileId.startsWith('/'))) {
+      setBlobUrl(fileId);
+      return;
+    }
+
+    if (fileId && fileId.length > 20) {
       import('../../api/gdriveWebService').then(({ gdriveWebService }) => {
         gdriveWebService.downloadImageBlob(fileId).then(url => {
           if (isMounted && url) {

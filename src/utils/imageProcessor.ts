@@ -60,7 +60,32 @@ export const compressImageToWebP = async (file: File | Blob, quality = 0.85): Pr
 };
 
 /**
- * Blob을 구글 드라이브에 직접 업로드합니다.
+ * Blob을 Cloudflare R2 스토리지에 직접 업로드합니다.
+ */
+export const uploadImageToR2 = async (
+  blob: Blob,
+  options: { userId?: string; albumId?: string; songId?: string; fileName?: string }
+): Promise<{ storageUrl: string; path: string }> => {
+  const { uploadSheetImageToR2 } = await import('../api/storageService');
+  const res = await uploadSheetImageToR2(blob, {
+    userId: options.userId || '',
+    albumId: options.albumId || 'misc',
+    songId: options.songId || `${Date.now()}`,
+    fileName: options.fileName,
+  });
+
+  if (!res.success) {
+    throw new Error(res.error || 'R2 스토리지 업로드 실패');
+  }
+
+  return {
+    storageUrl: res.storageUrl,
+    path: res.path,
+  };
+};
+
+/**
+ * Blob을 구글 드라이브에 직접 업로드합니다. (하위 호환성 유지)
  */
 export const uploadImageToGDrive = async (blob: Blob, fileName: string, parentFolderId?: string): Promise<string> => {
   if (!fileName || typeof fileName !== 'string' || !fileName.trim()) {

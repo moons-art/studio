@@ -6,7 +6,7 @@ import { ContiEditor } from './components/Hymnal/ContiEditor';
 import { MobilePdfLayout } from './components/Hymnal/MobilePdfLayout';
 import { TeamShareWindow } from './components/Hymnal/TeamShareWindow';
 import { TooltipIcon } from './components/TooltipIcon';
-import { PanelLeft, Music, Settings, X, WifiOff, Library, Layout, RotateCcw, HelpCircle, Share2, CreditCard, Gift, User as UserIcon } from 'lucide-react';
+import { PanelLeft, Music, Settings, X, WifiOff, Library, Layout, RotateCcw, HelpCircle, Share2, CreditCard, Gift, User as UserIcon, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { initGoogleApi, IS_LOCAL_DEV } from './api/gdriveWebService';
 import { auth } from './api/firebaseConfig';
@@ -40,6 +40,7 @@ const MainApp: React.FC = () => {
   const [userProfile, setUserProfile] = useState<{name: string, email: string, picture: string} | null>(null);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [showAdminModal, setShowAdminModal] = useState(false);
+  const [adminInitialAuth, setAdminInitialAuth] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(true);
   const [authPageSection, setAuthPageSection] = useState<'login' | 'pricing'>('login');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -99,7 +100,8 @@ const MainApp: React.FC = () => {
     clearConti, 
     contiItems, 
     showAllTooltips, 
-    setShowAllTooltips 
+    setShowAllTooltips,
+    isSyncing
   } = useHymnal();
 
   // 로컬 캐시 용량 상태
@@ -355,23 +357,42 @@ const MainApp: React.FC = () => {
                         <span className="text-xs font-normal text-[#2B2927] truncate">
                           {userProfile?.name || '사용자'}
                         </span>
-                        <span className="px-1.5 py-0.2 text-[9px] font-medium text-[#7D786F] bg-[#EBE5DC] rounded">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAdminInitialAuth(true);
+                            setShowAdminModal(true);
+                          }}
+                          className="px-1.5 py-0.5 text-[9px] font-bold text-[#6E6A63] hover:text-white bg-[#EBE5DC] hover:bg-neutral-900 border border-[#DDD8CE] hover:border-neutral-900 rounded-md transition-all cursor-pointer shadow-2xs flex items-center gap-0.5"
+                          title="관리자 대시보드 열기"
+                        >
+                          <ShieldCheck className="w-2.5 h-2.5 stroke-[2.5px]" />
                           admin
-                        </span>
+                        </button>
                         {isOffline && (
                           <WifiOff className="w-3 h-3 text-[#D97757] shrink-0 stroke-[1.5px]" title="오프라인 모드" />
                         )}
                       </div>
                     </div>
                     <button
+                      disabled={isSyncing}
                       onClick={async () => {
+                        if (isSyncing) {
+                          alert('악보 업로드가 진행 중입니다. 업로드가 완료된 후 로그아웃해 주세요.');
+                          return;
+                        }
                         if (confirm('로그아웃 하시겠습니까?')) {
                           const { gdriveWebService } = await import('./api/gdriveWebService');
                           await gdriveWebService.logout();
                           window.location.reload();
                         }
                       }}
-                      className="px-2 py-0.5 text-[10px] font-normal text-[#D97757] bg-[#F7EEE9] hover:bg-[#F2DFD5] rounded-md transition-all border border-[#F0DCD3] shrink-0 cursor-pointer"
+                      className={`px-2 py-0.5 text-[10px] font-normal transition-all rounded-md border shrink-0 ${
+                        isSyncing 
+                          ? 'opacity-40 text-neutral-400 bg-neutral-100 border-neutral-200 cursor-not-allowed'
+                          : 'text-[#D97757] bg-[#F7EEE9] hover:bg-[#F2DFD5] border-[#F0DCD3] cursor-pointer'
+                      }`}
+                      title={isSyncing ? "악보 업로드 중에는 로그아웃할 수 없습니다." : "로그아웃"}
                     >
                       로그아웃
                     </button>
@@ -693,7 +714,13 @@ const MainApp: React.FC = () => {
       <AnimatePresence>
         {showAdminModal && (
           <React.Suspense fallback={null}>
-            <AdminModal onClose={() => setShowAdminModal(false)} />
+            <AdminModal 
+              initialAuthenticated={adminInitialAuth}
+              onClose={() => {
+                setShowAdminModal(false);
+                setAdminInitialAuth(false);
+              }} 
+            />
           </React.Suspense>
         )}
       </AnimatePresence>

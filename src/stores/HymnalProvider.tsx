@@ -2,7 +2,9 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { HymnalSong } from '../types/hymnal';
 import { hymnalService } from '../services/hymnalService';
 import { hymnalApi } from '../api/hymnalApi';
-import { gdriveWebService } from '../api/gdriveWebService';
+import { hymnalFirestoreService } from '../api/hymnalFirestoreService';
+import { auth } from '../api/firebaseConfig';
+import { getIsHymnalVisible } from '../utils/adminConfig';
 
 export interface Album {
   id: string;
@@ -53,8 +55,8 @@ interface HymnalContextType {
   processImages: (albumId: string, isIncremental: boolean) => Promise<void>;
   
   // CSV
-  exportCSV: (albumId: string) => Promise<void>;
-  importCSV: () => Promise<void>;
+  exportCSV: (albumId: string, albumName?: string) => Promise<void>;
+  importCSV: (targetAlbumId?: string, targetAlbumName?: string) => Promise<void>;
 
   // --- Conti Editor ---
   contiItems: ContiItem[];
@@ -122,6 +124,21 @@ export const HymnalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [activeAlbumId, setActiveAlbumId] = useState<string>('all');
   const [processingProgress, setProcessingProgress] = useState<{ processed: number; total: number } | null>(null);
 
+  // 찬송가 전역 노출 및 비활성화 상태 (관리자 대시보드와 실시간 연동)
+  const [isHymnalVisible, setIsHymnalVisible] = useState(getIsHymnalVisible());
+
+  useEffect(() => {
+    const handleConfigChange = () => {
+      const visible = getIsHymnalVisible();
+      setIsHymnalVisible(visible);
+      if (!visible && activeAlbumId === 'hymnal') {
+        setActiveAlbumId('all');
+      }
+    };
+    window.addEventListener('admin_config_changed', handleConfigChange);
+    return () => window.removeEventListener('admin_config_changed', handleConfigChange);
+  }, [activeAlbumId]);
+
   // --- Conti Editor States ---
   const [contiItems, setContiItems] = useState<ContiItem[]>([]);
   const [contiTitle, setContiTitle] = useState('');
@@ -166,7 +183,16 @@ export const HymnalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const data = await hymnalApi.getSongs();
       setSongs(data);
       hymnalService.setSongs(data);
-      setFilteredSongs(data);
+      
+      // 현재 선택된 activeAlbumId에 맞춰 filteredSongs 즉시 동기화 (깜빡임 및 누락 방지)
+      let currentFiltered = data;
+      if (!isHymnalVisible) {
+        currentFiltered = currentFiltered.filter((s: any) => s.albumId !== 'hymnal');
+      }
+      if (activeAlbumId !== 'all') {
+        currentFiltered = currentFiltered.filter((s: any) => s.albumId === activeAlbumId || s.id.startsWith(`${activeAlbumId}-`));
+      }
+      setFilteredSongs(currentFiltered);
     } catch (e) {
       console.error("Failed to load music data via API", e);
     } finally {
@@ -195,19 +221,16 @@ export const HymnalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         await fetchSongs();     // 그 다음 곡 목록을 로드하며 누락된 앨범 복원
         await fetchSavedContis();
         
-        // 1. 구글 드라이브에서 다른 기기가 남긴 마지막 작업 상태 동기화 다운로드
+        // 1. 클라우드(Firestore 캐시)에서 다른 기기가 남긴 마지막 작업 상태 동기화 다운로드
         let lastContiData = null;
         try {
-          const { gdriveWebService } = await import('../api/gdriveWebService');
-          const driveLastConti = await gdriveWebService.downloadJsonFile('last_conti.json');
-          if (driveLastConti && driveLastConti.items) {
-            lastContiData = driveLastConti;
-            console.log('[HymnalProvider] Synced last conti status from Google Drive.');
+          const cloudLastConti = await hymnalFirestoreService.getLastConti();
+          if (cloudLastConti && cloudLastConti.items) {
+            lastContiData = cloudLastConti;
+            console.log('[HymnalProvider] Synced last conti status from Firestore.');
           }
-        } catch (driveErr: any) {
-          if (!driveErr?.message?.includes('Not authenticated')) {
-            console.warn('[HymnalProvider] Failed to fetch last conti from GDrive', driveErr.message);
-          }
+        } catch (err: any) {
+          console.warn('[HymnalProvider] Failed to fetch last conti from Cloud:', err?.message);
         }
 
         // 2. 드라이브 백업이 없다면 로컬 스토리지 데이터 백업 사용
@@ -237,11 +260,19 @@ export const HymnalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
 
     window.addEventListener('gdrive_authenticated', init);
-    
+    const unsubscribeAuth = auth.onAuthStateChanged((user) => {
+      if (user) {
+        init();
+      }
+    });
+
     // 비로그인 시에도 기본 악보 및 앨범 목록을 로드하기 위해 무조건 한 번 실행
     init();
 
-    return () => window.removeEventListener('gdrive_authenticated', init);
+    return () => {
+      window.removeEventListener('gdrive_authenticated', init);
+      unsubscribeAuth();
+    };
   }, []);
 
   // 콘티 변경 시 자동 백업 (로컬 및 구글 드라이브 실시간 동기화)
@@ -260,14 +291,11 @@ export const HymnalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // 로컬 백업은 기기 반응성(렉 없음)을 위해 즉시 실행
     localStorage.setItem('last_conti', JSON.stringify(contiState));
 
-    // 구글 드라이브 백업은 디바운스(1초) 적용하여 타이핑/드래그 시 API 과다 호출 방지
-    if (!gdriveWebService.getAccessToken()) return;
-
+    // 클라우드 백업은 디바운스(1초) 적용하여 타이핑/드래그 시 불필요한 과다 호출 방지
     const timer = setTimeout(async () => {
       try {
-        const { gdriveWebService } = await import('../api/gdriveWebService');
-        await gdriveWebService.uploadJsonFile('last_conti.json', contiState).catch(() => {});
-        console.log('[HymnalProvider] Auto-uploaded last conti status to Google Drive.');
+        await hymnalFirestoreService.saveLastConti(contiState);
+        console.log('[HymnalProvider] Auto-saved last conti status to Cloud.');
       } catch (err) {}
     }, 1000);
 
@@ -279,36 +307,39 @@ export const HymnalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     hymnalService.setSongs(songs);
   }, [songs]);
 
-  // Search and Filter Effect
+  // Search and Filter Effect (찬송가 비활성화 시 전체 앨범 및 검색에서도 완전히 차단)
   useEffect(() => {
     const timer = setTimeout(() => {
       let baseSongs = songs;
+
+      // [핵심] 찬송가 앨범이 가려져 있다면 모든 곳('all' 전체 보기 포함)에서 찬송가 곡 완전 비활성화/제외
+      if (!isHymnalVisible) {
+        baseSongs = baseSongs.filter(s => s.albumId !== 'hymnal');
+      }
+
       if (activeAlbumId !== 'all') {
-        baseSongs = songs.filter(s => s.albumId === activeAlbumId || s.id.startsWith(`${activeAlbumId}-`));
+        baseSongs = baseSongs.filter(s => s.albumId === activeAlbumId || s.id.startsWith(`${activeAlbumId}-`));
       }
       
       if (!searchQuery.trim()) {
         setFilteredSongs(baseSongs);
       } else {
         const results = hymnalService.search(searchQuery.normalize('NFC'));
-        // Filter search results by active album if applicable
-        const filtered = activeAlbumId === 'all' 
-          ? results 
-          : results.filter((s: any) => s.albumId === activeAlbumId || s.id.startsWith(`${activeAlbumId}-`));
+        let filtered = results;
+        if (!isHymnalVisible) {
+          filtered = filtered.filter((s: any) => s.albumId !== 'hymnal');
+        }
+        if (activeAlbumId !== 'all') {
+          filtered = filtered.filter((s: any) => s.albumId === activeAlbumId || s.id.startsWith(`${activeAlbumId}-`));
+        }
         setFilteredSongs(filtered as HymnalSong[]);
       }
     }, 200);
     return () => clearTimeout(timer);
-  }, [searchQuery, songs, activeAlbumId]);
+  }, [searchQuery, songs, activeAlbumId, isHymnalVisible]);
 
-  // Album Methods
+  // Album Methods (로그인 상태와 무관하게 즉시 생성 및 연동)
   const ensureAuth = async () => {
-    if (!gdriveWebService.getAccessToken()) {
-      if (!(await gdriveWebService.login())) {
-        alert('구글 로그인(드라이브 권한)이 필요합니다.');
-        return false;
-      }
-    }
     return true;
   };
 
@@ -526,15 +557,8 @@ export const HymnalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const result = await hymnalApi.syncGDrive(albumId);
       if (result.success) {
         const target = albums.find(a => a.id === albumId);
-        alert(`[${target?.name || '앨범'}] 동기화 완료!\n업로드: ${result.uploaded}, 건너뜀: ${result.skipped}`);
+        alert(`[${target?.name || '앨범'}] 동기화가 완료되었습니다.`);
         await fetchSongs();
-      } else if (result.message === 'Need Auth' || result.message?.includes('authenticated')) {
-        const loginSuccess = await gdriveWebService.login();
-        if (loginSuccess) {
-          alert('구글 드라이브 인증이 완료되었습니다. 다시 동기화를 시도해 주세요.');
-        } else {
-          alert('구글 드라이브 인증이 필요합니다.');
-        }
       }
     } finally {
       stopListening();
@@ -568,16 +592,24 @@ export const HymnalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
-  // CSV
-  const exportCSV = async (albumId: string) => {
-    const result = await hymnalApi.exportCSV({ mode: albumId });
-    if (result.success) alert('CSV 내보내기 완료');
+  // Excel / CSV 일괄 편집
+  const exportCSV = async (albumId: string, albumName?: string) => {
+    const targetAlbum = albums.find(a => a.id === albumId);
+    const resolvedName = albumName || targetAlbum?.name || (albumId === 'all' ? '전체악보' : albumId);
+    const result = await hymnalApi.exportExcel({ 
+      mode: albumId, 
+      albumName: resolvedName 
+    });
+    if (result.success) {
+      alert(`[${resolvedName}] 악보 엑셀 파일 다운로드가 완료되었습니다.`);
+    }
   };
 
-  const importCSV = async () => {
-    const result = await hymnalApi.importCSV();
+  const importCSV = async (targetAlbumId?: string, targetAlbumName?: string) => {
+    const result = await hymnalApi.importExcel(targetAlbumId);
     if (result.success) {
-      alert(`${result.count}곡 데이터 반영 완료`);
+      const albumText = targetAlbumName ? `[${targetAlbumName}] 앨범에 ` : '';
+      alert(`${albumText}${result.count}곡의 악보 데이터가 엑셀에서 성공적으로 반영되었습니다!`);
       await fetchSongs();
     }
   };
