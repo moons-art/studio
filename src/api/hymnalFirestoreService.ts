@@ -42,6 +42,27 @@ export interface FirestoreConti {
   updatedAt?: string;
 }
 
+/**
+ * Firestore는 undefined 필드 값을 허용하지 않으므로, 객체 내의 모든 undefined 필드를 안전하게 제거 및 정제합니다.
+ */
+export function cleanFirestoreData<T = any>(data: T): T {
+  if (data === null || data === undefined) return null as any;
+  if (Array.isArray(data)) {
+    return data
+      .filter((item) => item !== undefined)
+      .map((item) => cleanFirestoreData(item)) as any;
+  }
+  if (typeof data === 'object' && !(data instanceof Date)) {
+    const cleaned: any = {};
+    for (const [key, val] of Object.entries(data)) {
+      if (val === undefined) continue;
+      cleaned[key] = cleanFirestoreData(val);
+    }
+    return cleaned;
+  }
+  return data;
+}
+
 export const hymnalFirestoreService = {
   /**
    * 현재 인증된 유저의 UID를 획득합니다.
@@ -53,7 +74,21 @@ export const hymnalFirestoreService = {
       const offline = localStorage.getItem('offline_user_profile');
       if (offline) {
         const parsed = JSON.parse(offline);
-        if (parsed?.uid) return parsed.uid;
+        const resolved = parsed?.uid || parsed?.id;
+        if (resolved) return resolved;
+      }
+    } catch {}
+    try {
+      // 카카오/네이버 소셜 로그인 UID 안전 탐색
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('nations_social_user_')) {
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            const data = JSON.parse(raw);
+            if (data?.uid) return data.uid;
+          }
+        }
       }
     } catch {}
     return null;
@@ -104,9 +139,10 @@ export const hymnalFirestoreService = {
 
   saveAlbums: async (albums: FirestoreAlbum[]): Promise<boolean> => {
     const uid = hymnalFirestoreService.getCurrentUserId();
+    const cleanAlbums = cleanFirestoreData(albums) || [];
     if (!uid) {
       try {
-        localStorage.setItem('nations_guest_albums', JSON.stringify(albums));
+        localStorage.setItem('nations_guest_albums', JSON.stringify(cleanAlbums));
         return true;
       } catch {
         return false;
@@ -116,7 +152,7 @@ export const hymnalFirestoreService = {
     try {
       const albumsDocRef = doc(db, `users/${uid}/meta/albums`);
       await setDoc(albumsDocRef, {
-        albums,
+        albums: cleanAlbums,
         updatedAt: serverTimestamp(),
       }, { merge: true });
       return true;
@@ -213,14 +249,26 @@ export const hymnalFirestoreService = {
     const uid = hymnalFirestoreService.getCurrentUserId();
     if (uid) {
       try {
-        const cleanSong: any = { ...song };
+        const sanitized: any = {
+          ...song,
+          albumId: song.albumId || 'misc',
+          title: song.title || '',
+          code: song.code || '',
+          meter: song.meter || '',
+          category: song.category || '',
+          songForm: song.songForm || '',
+          lyrics: song.lyrics || '',
+          type: song.type || 'image',
+        };
         // Base64 Data URL이 Firestore에 들어가서 1MB 한도를 초과하지 않도록 정제
-        if (typeof cleanSong.storageUrl === 'string' && cleanSong.storageUrl.startsWith('data:')) {
-          cleanSong.storageUrl = '';
+        if (typeof sanitized.storageUrl === 'string' && sanitized.storageUrl.startsWith('data:')) {
+          sanitized.storageUrl = '';
         }
-        if (typeof cleanSong.filePath === 'string' && cleanSong.filePath.startsWith('data:')) {
-          cleanSong.filePath = '';
+        if (typeof sanitized.filePath === 'string' && sanitized.filePath.startsWith('data:')) {
+          sanitized.filePath = '';
         }
+
+        const cleanSong = cleanFirestoreData(sanitized);
 
         const songDocRef = doc(db, `users/${uid}/songs/${cleanSong.id}`);
         await setDoc(songDocRef, {
@@ -304,11 +352,11 @@ export const hymnalFirestoreService = {
 
   saveConti: async (conti: FirestoreConti): Promise<boolean> => {
     const uid = hymnalFirestoreService.getCurrentUserId();
-    const cleanConti = {
+    const cleanConti = cleanFirestoreData({
       ...conti,
       updatedAt: new Date().toISOString(),
       createdAt: conti.createdAt || new Date().toISOString(),
-    };
+    });
 
     if (!uid) {
       try {
@@ -389,9 +437,10 @@ export const hymnalFirestoreService = {
 
   saveLastConti: async (state: any): Promise<void> => {
     const uid = hymnalFirestoreService.getCurrentUserId();
+    const cleanState = cleanFirestoreData(state);
     if (!uid) {
       try {
-        localStorage.setItem('nations_guest_last_conti', JSON.stringify(state));
+        localStorage.setItem('nations_guest_last_conti', JSON.stringify(cleanState));
       } catch {}
       return;
     }
@@ -399,7 +448,7 @@ export const hymnalFirestoreService = {
     try {
       const docRef = doc(db, `users/${uid}/meta/lastConti`);
       await setDoc(docRef, {
-        state,
+        state: cleanState,
         updatedAt: serverTimestamp(),
       }, { merge: true });
     } catch (err) {

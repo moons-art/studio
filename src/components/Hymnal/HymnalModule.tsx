@@ -231,6 +231,7 @@ export const HymnalModule: React.FC = () => {
   const [lyricsEditValue, setLyricsEditValue] = useState('');
   const [isSavingLyrics, setIsSavingLyrics] = useState(false);
   const [lyricsSavedNotice, setLyricsSavedNotice] = useState(false);
+  const [isAnalyzingScore, setIsAnalyzingScore] = useState(false);
   const [visibleCount, setVisibleCount] = useState(50);
   const [swipedSongId, setSwipedSongId] = useState<string | null>(null);
   const [isDraggingSong, setIsDraggingSong] = useState(false);
@@ -398,6 +399,102 @@ export const HymnalModule: React.FC = () => {
         console.error('[HymnalModule] 백그라운드 수정 실패:', result.error);
       }
     });
+  };
+
+  // --- AI 악보정보 분석 핸들러 ---
+  const handleAnalyzeScore = async () => {
+    if (!selectedSong) return;
+    setIsAnalyzingScore(true);
+    try {
+      const { imageCache } = await import('../../utils/imageCache');
+      const { analyzeScoreImage, formatScoreSectionsToText } = await import('../../api/aiScoreService');
+
+      let imageBlob: Blob | null = null;
+      const targetKey = (selectedSong as any).fileId || (selectedSong.filePath && !selectedSong.filePath.startsWith('http') ? selectedSong.filePath : '');
+      const remoteUrl = (selectedSong as any).storageUrl && (selectedSong as any).storageUrl.startsWith('http') 
+        ? (selectedSong as any).storageUrl 
+        : (selectedSong.filePath && selectedSong.filePath.startsWith('http') ? selectedSong.filePath : '');
+
+      if (targetKey) {
+        imageBlob = await imageCache.getImage(targetKey);
+      }
+
+      if (!imageBlob && remoteUrl) {
+        const res = await fetch(remoteUrl);
+        if (res.ok) {
+          imageBlob = await res.blob();
+        }
+      }
+
+      if (!imageBlob && (selectedSong as any).fileId && !(selectedSong as any).fileId.startsWith('song_') && !(selectedSong as any).fileId.startsWith('http')) {
+        const { gdriveWebService } = await import('../../api/gdriveWebService');
+        const blobUrl = await gdriveWebService.downloadImageBlob((selectedSong as any).fileId);
+        if (blobUrl) {
+          const res = await fetch(blobUrl);
+          if (res.ok) imageBlob = await res.blob();
+        }
+      }
+
+      if (!imageBlob) {
+        alert('악보 이미지를 불러올 수 없습니다. 원본 이미지 상태를 확인해 주세요.');
+        return;
+      }
+
+      const result = await analyzeScoreImage(imageBlob);
+
+      if (!result.isSheetMusic) {
+        alert(`악보가 아닌 것으로 판별되었습니다.\n사유: ${result.notSheetMusicReason || '악보 기호나 오선지를 찾을 수 없습니다.'}`);
+        return;
+      }
+
+      // 악보 분석 성공 처리
+      const newTitle = result.title || selectedSong.title;
+      const newCode = result.keySignature ? (result.keySignature.replace(/Major|Minor|장조|단조/gi, '').trim() || result.keySignature.trim()) : (selectedSong.code || '');
+      const newMeter = result.timeSignature || selectedSong.meter || '';
+      const newCategory = result.theme || selectedSong.category || '';
+      const newSongForm = result.structure || selectedSong.songForm || '';
+      const formattedLyrics = result.sections && result.sections.length > 0 
+        ? formatScoreSectionsToText(result.sections) 
+        : (result.firstLyric || selectedSong.lyrics || '');
+
+      const updatedSongData = {
+        title: newTitle,
+        code: newCode,
+        meter: newMeter,
+        category: newCategory,
+        songForm: newSongForm,
+        lyrics: formattedLyrics,
+        isManual: true,
+        updatedAt: new Date().toISOString()
+      };
+
+      // 1. 낙관적 UI 업데이트
+      setSongs(prev => prev.map(s => s.id === selectedSong.id ? { ...s, ...updatedSongData } : s));
+      setLyricsEditValue(formattedLyrics);
+
+      // 편집창 모드일 경우 인풋 상태도 동기화
+      setEditedTitle(newTitle);
+      setEditedCode(newCode);
+      setEditedMeter(newMeter);
+      setEditedCategory(newCategory);
+      setEditedLyrics(formattedLyrics);
+
+      // 2. 백그라운드 DB 저장
+      hymnalApi.updateSong({ id: selectedSong.id, ...updatedSongData }).catch(err => {
+        console.error('[HymnalModule] AI 분석 결과 저장 실패:', err);
+      });
+
+      // 3. 코드 & 가사 뷰 열어서 분석 결과 바로 확인 가능하게 지원
+      setShowYoutubePlayer(true);
+      setShowCodeText(true);
+
+      alert(`[AI 악보정보 분석 완료]\n\n• 곡명: ${newTitle}\n• 코드(Key): ${newCode || '미확인'}\n• 박자: ${newMeter || '미확인'}\n• 송폼: ${newSongForm || '미확인'}\n\n상세 정보 및 가사+코드가 자동으로 채워졌습니다.`);
+    } catch (err: any) {
+      console.error('[HymnalModule] AI 분석 오류:', err);
+      alert(`AI 악보정보 분석 중 오류가 발생했습니다: ${err?.message || err}`);
+    } finally {
+      setIsAnalyzingScore(false);
+    }
   };
 
   const startEditing = () => {
@@ -686,6 +783,15 @@ export const HymnalModule: React.FC = () => {
                         
                         <div className="flex items-center gap-2 ml-1">
                           <button 
+                            type="button"
+                            onClick={handleAnalyzeScore}
+                            disabled={isAnalyzingScore}
+                            className="h-10 px-3 bg-white text-[#4A4741] hover:bg-[#F5F3ED] border border-[#E7E5DF] rounded-xl text-xs font-semibold shadow-2xs transition-all shrink-0 cursor-pointer disabled:opacity-50"
+                            title="AI 악보정보 분석으로 제목/코드/박자/가사 자동 채우기"
+                          >
+                            {isAnalyzingScore ? '분석 중...' : 'AI 악보정보 분석'}
+                          </button>
+                          <button 
                             onClick={() => setIsEditing(false)}
                             className="h-10 px-4 bg-[#F5F3ED] text-[#6A6864] rounded-xl text-xs font-semibold hover:bg-[#ECEAE4] transition-all shrink-0 cursor-pointer"
                           >
@@ -795,6 +901,20 @@ export const HymnalModule: React.FC = () => {
                           >
                             <Plus className="w-3.5 h-3.5 stroke-[2px]" />
                             <span>콘티담기</span>
+                          </button>
+
+                          {/* AI 악보정보 분석 (아이콘 제거, 심플한 글자) */}
+                          <button 
+                            onClick={handleAnalyzeScore}
+                            disabled={isAnalyzingScore}
+                            className={`flex items-center px-2.5 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer border shadow-2xs ${
+                              isAnalyzingScore
+                                ? 'bg-neutral-100 text-neutral-400 border-neutral-200 cursor-not-allowed'
+                                : 'bg-white text-[#4A4741] hover:text-[#2B2927] hover:bg-[#F3EFE9] border-[#E7E5DF]'
+                            }`}
+                            title="AI가 악보 이미지를 판독하여 제목, 코드(Key), 박자, 가사+코드를 자동 추출합니다"
+                          >
+                            <span>{isAnalyzingScore ? '분석 중...' : 'AI 악보정보 분석'}</span>
                           </button>
 
                           {/* 상세 편집 */}

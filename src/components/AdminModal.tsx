@@ -28,6 +28,7 @@ import {
 import { collection, query, orderBy, limit, getDocs, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { db, authDb } from '../api/firebaseConfig';
 import { getIsHymnalVisible, setIsHymnalVisible, getUserPlan, setUserPlan } from '../utils/adminConfig';
+import { getGeminiApiKey, setGeminiApiKey, isValidGeminiKeyFormat } from '../api/aiScoreService';
 
 interface AdminModalProps {
   onClose: () => void;
@@ -82,6 +83,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({ onClose, initialAuthenti
 
   // 찬송가 사이드바 노출 설정 (기본값 false, 대시보드에서 ON 시 사이드바에 오픈)
   const [isHymnalOn, setIsHymnalOn] = useState<boolean>(getIsHymnalVisible());
+  const [apiKeyInput, setApiKeyInput] = useState<string>(() => getGeminiApiKey());
 
   // 검색 및 필터 상태
   const [searchQuery, setSearchQuery] = useState('');
@@ -783,6 +785,55 @@ export const AdminModal: React.FC<AdminModalProps> = ({ onClose, initialAuthenti
                       <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-blue-100 text-blue-800">
                         ACTIVE (0원 방어)
                       </span>
+                    </div>
+
+                    <div className="py-4 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="font-bold text-sm text-neutral-900">
+                            AI 악보정보 분석 Gemini API Key
+                          </div>
+                          <p className="text-xs text-neutral-500 mt-0.5">
+                            Google AI Studio 최신 키(AQ.Ab8...) 및 구형 키(AIzaSy...)를 모두 지원합니다.
+                          </p>
+                        </div>
+                        <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-neutral-100 text-neutral-700 border border-neutral-300">
+                          최신 키 규격 지원
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 pt-1">
+                        <input
+                          type="password"
+                          value={apiKeyInput}
+                          onChange={(e) => setApiKeyInput(e.target.value)}
+                          placeholder="AQ.Ab8RN6... 또는 AIzaSy..."
+                          className="flex-1 px-3 py-2 bg-neutral-50 border border-neutral-300 rounded-xl text-xs font-mono text-neutral-900 focus:outline-none focus:border-black"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (apiKeyInput && !isValidGeminiKeyFormat(apiKeyInput)) {
+                              if (!confirm('입력하신 키 형식이 일반적인 Gemini API 키(AQ. 또는 AIzaSy로 시작)와 다릅니다. 계속 저장하시겠습니까?')) return;
+                            }
+                            setGeminiApiKey(apiKeyInput);
+                            alert('Gemini API 키가 저장되었습니다.');
+                          }}
+                          className="px-4 py-2 bg-neutral-900 hover:bg-black text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-2xs"
+                        >
+                          저장
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setGeminiApiKey('');
+                            setApiKeyInput(getGeminiApiKey());
+                            alert('기본 API 키로 복원되었습니다.');
+                          }}
+                          className="px-3 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-xs font-semibold rounded-xl transition-all cursor-pointer"
+                        >
+                          기본값
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>

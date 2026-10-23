@@ -61,6 +61,7 @@ export const HymnalSidebar: React.FC = () => {
   const [isHymnalVisible, setIsHymnalVisible] = useState(getIsHymnalVisible());
   const [userPlan, setUserPlan] = useState(getUserPlan());
   const [showAlbumSelectModal, setShowAlbumSelectModal] = useState(false);
+  const [enableAiScoreAnalysis, setEnableAiScoreAnalysis] = useState(false);
   const [albumModalAction, setAlbumModalAction] = useState<'add_song' | 'excel_download' | 'excel_upload'>('add_song');
 
   // 앨범별 곡 수 실시간 집계
@@ -146,7 +147,7 @@ export const HymnalSidebar: React.FC = () => {
       // 신규 추가된 파일들만 선별하여 구글 드라이브 업로드 수행 (데이터베이스 json 수정 안함)
       const newSongs = await hymnalApi.batchUploadImagesToGDrive(filesToUpload, albumName, (processed, total) => {
         setUploadProgress({ processed, total });
-      }, albumId);
+      }, albumId, enableAiScoreAnalysis);
 
       // 3. 앨범 목록 업데이트
       if (!albums.find(a => a.id === albumId)) {
@@ -216,7 +217,8 @@ export const HymnalSidebar: React.FC = () => {
         (processed, total) => {
           setUploadProgress({ processed, total });
         },
-        targetAlbumId
+        targetAlbumId,
+        enableAiScoreAnalysis
       );
 
       // 100% 완료 상태 유지 후 UI 피드백 제공
@@ -732,6 +734,21 @@ export const HymnalSidebar: React.FC = () => {
                 {albumModalAction === 'add_song' && '파일 제목을 찬양이름으로 수정하여 올리세요'}
                 {albumModalAction === 'excel_download' && '선택한 앨범의 악보 정보를 엑셀로 다운로드합니다.'}
               </p>
+            )}
+
+            {albumModalAction === 'add_song' && (
+              <label className="flex items-center gap-2.5 p-2.5 bg-neutral-50 hover:bg-neutral-100 rounded-xl border border-neutral-200 cursor-pointer select-none mb-3.5 transition-colors">
+                <input 
+                  type="checkbox"
+                  checked={enableAiScoreAnalysis}
+                  onChange={(e) => setEnableAiScoreAnalysis(e.target.checked)}
+                  className="w-4 h-4 rounded accent-black cursor-pointer shrink-0"
+                />
+                <div className="flex flex-col">
+                  <span className="text-xs font-bold text-neutral-900">[✔ AI 악보정보 분석]</span>
+                  <span className="text-[10px] text-neutral-500">업로드 시 이미지에서 곡명, 코드(Key), 박자, 가사+코드를 자동 추출합니다</span>
+                </div>
+              </label>
             )}
 
             <div className="space-y-2 max-h-64 overflow-y-auto pr-1">

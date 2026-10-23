@@ -70,19 +70,77 @@ export const hymnalApi = {
       // 2. Firestore에서 유저 악보 데이터 로드 (Offline Persistence 로컬 캐시 적용)
       const userSongs = await hymnalFirestoreService.getUserSongs();
 
-      // 레거시 구글 드라이브 마이그레이션 브릿지 (기존 유저의 곡 데이터가 Firestore에 아직 없는 경우)
-      if (userSongs.length === 0 && gdriveWebService.getAccessToken()) {
+      // 3. 구글 드라이브 실시간 스캔 & 자동 마이그레이션 브릿지
+      // (기존 구글 드라이브 폴더에 보관 중인 악보 파일들을 자동 감지하여 화면 및 새 DB로 100% 복원)
+      const gdriveToken = gdriveWebService.getAccessToken();
+      if (gdriveToken && gdriveToken !== 'offline_token') {
         try {
-          const driveMusicData = await gdriveWebService.downloadJsonFile('music_data.json');
-          if (Array.isArray(driveMusicData) && driveMusicData.length > 0) {
-            console.log(`[hymnalApi] Migrating ${driveMusicData.length} songs from Google Drive to Firestore...`);
-            for (const s of driveMusicData) {
-              await hymnalFirestoreService.saveUserSong(s);
+          const settings = await hymnalApi.getSettings();
+          const activeAlbums = settings.albums || [];
+          const nonHymnalAlbums = activeAlbums.filter((a: any) => a.id !== 'hymnal');
+
+          // 1) music_data.json 부가 메타데이터가 있다면 다운로드
+          let driveMusicData: any[] = [];
+          try {
+            const mData = await gdriveWebService.downloadJsonFile('music_data.json');
+            if (Array.isArray(mData)) driveMusicData = mData;
+          } catch {}
+
+          // 2) 각 앨범의 구글 드라이브 폴더 실시간 스캔
+          const existingIds = new Set(userSongs.map((s: any) => s.id));
+          const existingFileIds = new Set(userSongs.map((s: any) => (s as any).fileId).filter(Boolean));
+
+          for (const album of nonHymnalAlbums) {
+            const folderName = (album.id === 'misc' || album.name === '기타앨범' || album.name === '기타악보' || album.name === '미분류') 
+              ? '미분류' 
+              : album.name;
+
+            try {
+              const files = await gdriveWebService.listFolderFiles(folderName);
+              if (Array.isArray(files) && files.length > 0) {
+                for (let index = 0; index < files.length; index++) {
+                  const file = files[index];
+                  const songId = `${album.id}-${file.id}`;
+                  
+                  // 이미 존재하는 곡이면 스킵
+                  if (existingIds.has(songId) || existingFileIds.has(file.id)) continue;
+
+                  const title = file.name.replace(/\.[^/.]+$/, "");
+                  const meta = driveMusicData.find((s: any) => s.id === songId || s.title === title || s.fileId === file.id);
+                  const numMatch = file.name.match(/\d+/);
+                  const number = meta?.number || (numMatch ? parseInt(numMatch[0], 10) : index + 1);
+
+                  const recoveredSong = {
+                    id: songId,
+                    title: meta?.title || title,
+                    number: number,
+                    albumId: album.id,
+                    type: 'image',
+                    fileId: file.id,
+                    filePath: file.id,
+                    storageUrl: file.id,
+                    lyrics: meta?.lyrics || '',
+                    code: meta?.code || '',
+                    meter: meta?.meter || '',
+                    category: meta?.category || '',
+                    songForm: meta?.songForm || '',
+                    searchTokens: [title, meta?.title].filter(Boolean)
+                  };
+
+                  userSongs.push(recoveredSong);
+                  existingIds.add(songId);
+                  existingFileIds.add(file.id);
+
+                  // 백그라운드로 Firestore 및 IndexedDB에 영구 저장 (자가 복구)
+                  hymnalFirestoreService.saveUserSong(recoveredSong).catch(() => {});
+                }
+              }
+            } catch (scanErr) {
+              console.warn(`[hymnalApi] Failed to scan Google Drive folder: ${folderName}`, scanErr);
             }
-            return hymnalApi.getSongs(); // 마이그레이션 후 재조회
           }
         } catch (migErr) {
-          console.warn('[hymnalApi] Legacy drive migration skipped:', migErr);
+          console.warn('[hymnalApi] Google Drive scan & migration bridge error:', migErr);
         }
       }
 
@@ -120,9 +178,19 @@ export const hymnalApi = {
    */
   addAlbum: async (album: any) => {
     const settings = await hymnalApi.getSettings();
-    const newAlbum = { ...album, id: `album-${Date.now()}`, type: 'custom' };
+    const newAlbum = {
+      id: album.id || `album-${Date.now()}`,
+      name: album.name,
+      path: album.path || '',
+      type: 'custom'
+    };
     settings.albums = settings.albums || [];
-    settings.albums.push(newAlbum);
+    const existingIdx = settings.albums.findIndex((a: any) => a.id === newAlbum.id);
+    if (existingIdx !== -1) {
+      settings.albums[existingIdx] = newAlbum;
+    } else {
+      settings.albums.push(newAlbum);
+    }
     const saveResult = await hymnalApi.saveSettings(settings);
     if (!saveResult.success) return saveResult;
     return { success: true, album: newAlbum };
@@ -400,18 +468,20 @@ export const hymnalApi = {
 
   /**
    * 폴더 단위 이미지 일괄 압축 및 Cloudflare R2 / 스토리지 업로드
-   * (기존 WebP 압축 파이프라인 및 인터페이스 100% 유지)
+   * (기존 WebP 압축 파이프라인 및 인터페이스 100% 유지 + AI 악보정보 분석 지원)
    */
   batchUploadImagesToGDrive: async (
     files: File[],
     albumName: string,
     onProgress: (processed: number, total: number) => void,
-    albumId?: string
+    albumId?: string,
+    enableAiAnalysis: boolean = false
   ) => {
     const { compressImageToWebP, uploadImageToR2 } = await import('../utils/imageProcessor');
+    const { analyzeScoreImage, formatScoreSectionsToText } = await import('./aiScoreService');
     const uploadedSongs: any[] = [];
     let processedCount = 0;
-    const CHUNK_SIZE = 4;
+    const CHUNK_SIZE = enableAiAnalysis ? 2 : 4;
     const finalAlbumId = albumId || (albumName === '새찬송가' ? 'hymnal' : (albumName === '미분류' ? 'misc' : albumName));
 
     for (let i = 0; i < files.length; i += CHUNK_SIZE) {
@@ -451,9 +521,45 @@ export const hymnalApi = {
           const numMatch = fileName.match(/\d+/);
           const number = numMatch ? parseInt(numMatch[0], 10) : uploadedSongs.length + 1;
 
+          // 3. AI 악보정보 분석
+          let songTitle = fileName;
+          let songCode = '';
+          let songMeter = '';
+          let songCategory = '';
+          let songForm = '';
+          let songLyrics = '';
+          const searchTokens: string[] = [fileName];
+
+          if (enableAiAnalysis) {
+            try {
+              const aiResult = await analyzeScoreImage(compressedBlob);
+              if (aiResult && aiResult.isSheetMusic) {
+                if (aiResult.title) {
+                  songTitle = aiResult.title.trim();
+                  searchTokens.push(songTitle);
+                }
+                if (aiResult.keySignature) {
+                  songCode = aiResult.keySignature.replace(/Major|Minor|장조|단조/gi, '').trim() || aiResult.keySignature.trim();
+                }
+                if (aiResult.timeSignature) songMeter = aiResult.timeSignature.trim();
+                if (aiResult.theme) songCategory = aiResult.theme.trim();
+                if (aiResult.structure) songForm = aiResult.structure.trim();
+                if (aiResult.sections && aiResult.sections.length > 0) {
+                  songLyrics = formatScoreSectionsToText(aiResult.sections);
+                } else if (aiResult.firstLyric) {
+                  songLyrics = aiResult.firstLyric;
+                }
+                if (aiResult.firstLyric) searchTokens.push(aiResult.firstLyric);
+                if (aiResult.artistOrComposer) searchTokens.push(aiResult.artistOrComposer);
+              }
+            } catch (aiErr) {
+              console.warn(`[hymnalApi] AI score analysis skipped for ${file.name}:`, aiErr);
+            }
+          }
+
           const newSong = {
             id: songId,
-            title: fileName,
+            title: songTitle,
             number: number,
             albumId: finalAlbumId,
             type: 'image',
@@ -461,7 +567,13 @@ export const hymnalApi = {
             storageUrl: finalStorageUrl,
             fileId: songId, // imageCache 고속 조회 키
             fileSize: compressedBlob.size, // 실제 WebP 파일 바이트 크기 (R2 / 로컬 실측)
-            searchTokens: [fileName]
+            code: songCode || '',
+            meter: songMeter || '',
+            category: songCategory || '',
+            songForm: songForm || '',
+            lyrics: songLyrics || '',
+            isManual: enableAiAnalysis ? true : false,
+            searchTokens
           };
 
           // Firestore에 악보 메타데이터 저장 (초경량 메타데이터로 100% 성공)
@@ -478,13 +590,14 @@ export const hymnalApi = {
   },
 
   /**
-   * 단일/다중 악보 파일 업로드
+   * 단일/다중 악보 파일 업로드 (기본 미분류)
    */
   uploadSingleImagesToGDrive: async (
     files: File[],
-    onProgress: (processed: number, total: number) => void
+    onProgress: (processed: number, total: number) => void,
+    enableAiAnalysis: boolean = false
   ) => {
-    return hymnalApi.batchUploadImagesToGDrive(files, '미분류', onProgress, 'misc');
+    return hymnalApi.batchUploadImagesToGDrive(files, '미분류', onProgress, 'misc', enableAiAnalysis);
   },
 
   /**
