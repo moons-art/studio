@@ -200,20 +200,43 @@ export function formatScoreSectionsToText(sections: ScoreSection[]): string {
 }
 
 /**
- * 악보 이미지 AI 분석 실행 (Gemini 멀티모달 API 호출)
+ * 악보 이미지 AI 분석 실행 (1차: 서버리스 함수 은닉 호출, 2차: 직접 호출 폴백)
  */
 export async function analyzeScoreImage(
   imageSource: string | Blob, 
   customApiKey?: string
 ): Promise<ScoreAnalysisResult> {
+  // 1. 이미지를 Base64 데이터로 변환
+  const { mimeType, base64Data } = await toBase64Image(imageSource);
+
+  // 2. [보안 최우선] Cloud Functions 서버리스 함수(analyzeScoreCallable) 호출
+  // 브라우저 네트워크 탭에 Gemini API 키가 절대 노출되지 않도록 서버 내부에서 처리합니다.
+  try {
+    const { functions } = await import('./firebaseConfig');
+    const { httpsCallable } = await import('firebase/functions');
+    const analyzeCallable = httpsCallable<any, { success: boolean; result: ScoreAnalysisResult }>(
+      functions,
+      'analyzeScoreCallable'
+    );
+    const serverRes = await analyzeCallable({
+      mimeType: mimeType || 'image/jpeg',
+      base64Data,
+      customApiKey: customApiKey || undefined
+    });
+
+    if (serverRes?.data?.success && serverRes.data.result) {
+      console.log('[aiScoreService] Serverless analysis completed securely.');
+      return serverRes.data.result;
+    }
+  } catch (serverErr: any) {
+    console.warn('[aiScoreService] Serverless callable bypassed or failed, trying fallback:', serverErr?.message || serverErr);
+  }
+
+  // 3. 서버리스 미도달 시 안전한 로컬 폴백
   const apiKey = (customApiKey && customApiKey.trim()) || getGeminiApiKey();
-  
   if (!apiKey) {
     throw new Error('Gemini API 키가 설정되지 않았습니다.');
   }
-
-  // 1. 이미지를 Base64 데이터로 변환
-  const { mimeType, base64Data } = await toBase64Image(imageSource);
 
   const requestBody = {
     contents: [
