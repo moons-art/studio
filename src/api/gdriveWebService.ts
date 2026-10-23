@@ -1070,6 +1070,23 @@ export const gdriveWebService = {
   getFileBlob: async (fileId: string): Promise<Blob | null> => {
     if (!fileId) return null;
     
+    // 0. 완전한 원격 HTTP/HTTPS URL인 경우 fetch로 가져와 로컬 캐시에 저장 후 반환
+    if (fileId.startsWith('http://') || fileId.startsWith('https://')) {
+      const cachedBlob = await imageCache.getImage(fileId);
+      if (cachedBlob && cachedBlob.size > 0) return cachedBlob;
+      try {
+        const response = await fetch(fileId);
+        if (response.ok) {
+          const blob = await response.blob();
+          imageCache.saveImage(fileId, blob).catch(() => {});
+          return blob;
+        }
+      } catch (fetchErr) {
+        console.warn('[gdriveWebService] Remote URL fetch failed:', fetchErr);
+      }
+      return null;
+    }
+
     // 1. 로컬 캐시 조회
     const cachedBlob = await imageCache.getImage(fileId);
     if (cachedBlob && cachedBlob.size > 0) {

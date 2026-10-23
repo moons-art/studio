@@ -39,7 +39,7 @@ export const InviteBonusModal: React.FC<InviteBonusModalProps> = ({
       appName: 'NATIONS STUDIO',
       title: `[초대] ${currentUser?.displayName || '성도'}님이 찬양 콘티 스튜디오에 초대하셨습니다!`,
       description:
-        '초대링크로 가입 후 무료 앨범 만들기 + 무료 첫 악보를 출력하면 SOLO 플랜 혜택을 함께 받으실 수 있습니다.'
+        '초대링크로 가입 후 무료 앨범 만들기 + 무료 첫 콘티를 저장하면 SOLO 플랜 혜택을 함께 받으실 수 있습니다.'
     });
   };
 
@@ -71,7 +71,9 @@ export const InviteBonusModal: React.FC<InviteBonusModalProps> = ({
             <h3 className="font-bold text-base sm:text-lg text-[#1C1A18] leading-tight">
               친구 초대 1+1 보너스
             </h3>
-            <p className="text-[11px] text-[#8C877D] mt-0.5">찬양팀 동역자와 함께 나누는 특별한 혜택</p>
+            <p className="text-xs text-red-600 font-bold mt-0.5">
+              총 9개월 무료이용권을 선물로 드려요
+            </p>
           </div>
         </div>
 
@@ -80,12 +82,12 @@ export const InviteBonusModal: React.FC<InviteBonusModalProps> = ({
           {/* 기본 혜택 카드 */}
           <div className="bg-[#FAF9F7] p-4 rounded-2xl border border-[#EAE8E1] text-xs text-[#4A4741] space-y-2.5">
             <div className="leading-relaxed text-[#2C2B29]">
-              초대링크로 가입 한 친구(무료 앨범 만들기+무료 첫 악보를 출력한 친구에 한해){' '}
-              <span className="font-bold text-[#DA7756]">5명을 모으면 SOLO 플랜 3개월 이용권</span> 지급!
+              초대링크로 가입 한 친구(무료 앨범 만들기+무료 첫 콘티 저장하기를 한 친구에 한해){' '}
+              <strong className="font-bold text-[#1C1A18]">5명을 모으면</strong> SOLO 플랜 3개월 이용권 지급!
             </div>
             <div className="pt-2 border-t border-[#EAE8E1] leading-relaxed text-[#2C2B29]">
-              + 5명을 더 모으면(총 10명){' '}
-              <span className="font-bold text-[#1C1A18]">SOLO 플랜 3개월 이용권 (or TEAM 플랜 1개월 이용권)</span> 지급!
+              + <strong className="font-bold text-[#1C1A18]">5명을</strong> 더 모으면(총 10명){' '}
+              <span className="font-bold text-[#DA7756]">SOLO 플랜 3개월 이용권 (or TEAM 플랜 1개월 이용권)</span> 지급!
             </div>
           </div>
 
@@ -97,9 +99,9 @@ export const InviteBonusModal: React.FC<InviteBonusModalProps> = ({
             <p className="text-[12px] text-[#2C2B29] leading-relaxed">
               위 조건에 <strong>+5명을 추가(총 15명)</strong>하면{' '}
               <strong className="text-[#DA7756]">
-                Nations Bible(네이션스 바이블: 나만의 성경주석) 6개월 구독권(or Nations Studio 3개월 이용권)
+                Nations Bible(네이션스 바이블: 나만의 성경주석) 6개월 구독권(or Nations Studio solo 3개월 이용권)
               </strong>
-              을 드립니다.
+              을 추가로 드립니다.
             </p>
           </div>
         </div>

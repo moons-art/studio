@@ -24,7 +24,7 @@ const sermonFirebaseConfig = {
 };
 
 // Initialize Content Firebase (ccm-ymoonsik)
-const app = getApps().find(a => a.name === '[DEFAULT]') || initializeApp(firebaseConfig);
+export const app = getApps().find(a => a.name === '[DEFAULT]') || initializeApp(firebaseConfig);
 
 // Initialize Auth Hub Firebase (sermon-ym)
 export const authApp = getApps().find(a => a.name === 'AUTH_APP') || initializeApp(sermonFirebaseConfig, 'AUTH_APP');

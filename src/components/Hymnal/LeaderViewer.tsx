@@ -2,8 +2,11 @@ import React, { useState, useEffect, useCallback } from 'react';
 import type { ContiItem } from '../../stores/HymnalProvider';
 import { useHymnal } from '../../stores/HymnalProvider';
 import { hymnalApi } from '../../api/hymnalApi';
-import { X, ChevronLeft, ChevronRight, Library, StickyNote, Monitor, Users, FileText, Loader2, Share2, Check, Download, ChevronUp, ChevronDown } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Library, StickyNote, Monitor, Users, FileText, Loader2, Share2, Check, Download, ChevronUp, ChevronDown, AlertCircle, ExternalLink } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { db } from '../../api/firebaseConfig';
+import { doc, setDoc } from 'firebase/firestore';
+import { shareInviteViaKakao } from '../../utils/socialAuth';
 
 interface LeaderViewerProps {
   onClose: () => void;
@@ -11,7 +14,7 @@ interface LeaderViewerProps {
 }
 
 export const LeaderViewer: React.FC<LeaderViewerProps> = ({ onClose, onOpenLibrary }) => {
-  const { contiItems, songs, contiTitle } = useHymnal();
+  const { contiItems, songs, contiTitle, currentContiId } = useHymnal();
   
   const [isGenerating, setIsGenerating] = useState(false);
   const [genProgress, setGenProgress] = useState({ msg: '', percent: 0 });
@@ -29,6 +32,71 @@ export const LeaderViewer: React.FC<LeaderViewerProps> = ({ onClose, onOpenLibra
     localStorage.setItem('nations-community-name', communityName);
     localStorage.setItem('ceum-community-name', communityName);
   }, [communityName]);
+
+  // 회중용 웹 뷰어 공유 상태
+  const [isPublishingCongregation, setIsPublishingCongregation] = useState(false);
+  const [showCongregationModal, setShowCongregationModal] = useState(false);
+  const [congregationUrl, setCongregationUrl] = useState('');
+  const [isCopiedCongregation, setIsCopiedCongregation] = useState(false);
+
+  const handleOpenCongregationShare = async () => {
+    if (visibleItems.length === 0) {
+      alert('콘티에 악보가 없습니다.');
+      return;
+    }
+    setIsPublishingCongregation(true);
+
+    try {
+      // 1. 콘티 ID 확정 (없으면 임시 ID 생성)
+      const targetContiId = currentContiId || `conti_${Date.now()}`;
+      const cleanTeamId = (communityName || 'NATIONS CHURCH').trim().replace(/[\/\s#?]/g, '_');
+      const contiDocRef = doc(db, 'teams', cleanTeamId, 'contis', targetContiId);
+
+      // 2. 회중들이 읽을 수 있도록 songsInfo 구성
+      const songsInfo = visibleItems.map((item) => {
+        const song = songs.find(s => {
+          if (!s || !s.id || !item.songId) return false;
+          const sId = s.id.toString();
+          const tId = item.songId.toString();
+          return sId === tId || (s.fileId && s.fileId.toString() === tId) || tId.endsWith('-' + sId) || sId.endsWith('-' + tId);
+        });
+        return {
+          itemId: item.id,
+          songId: song?.id || item.songId,
+          title: song?.title || '제목 없음',
+          code: song?.code || '',
+          meter: song?.meter || '',
+          filePath: song?.filePath || '',
+          fileId: song?.fileId || '',
+          crop: item.crop || null
+        };
+      });
+
+      // 3. Firestore에 공개 콘티 문서 저장
+      await setDoc(contiDocRef, {
+        id: targetContiId,
+        title: contiTitle || '예배 찬양 콘티',
+        items: visibleItems,
+        songsInfo,
+        updatedAt: new Date().toISOString(),
+        publishedAt: Date.now()
+      }, { merge: true });
+
+      // 4. 회중용 웹 뷰어 URL 생성
+      const url = `${window.location.origin}${window.location.pathname}?mode=congregation&team=${encodeURIComponent(communityName)}&contiId=${targetContiId}`;
+      setCongregationUrl(url);
+      setShowCongregationModal(true);
+
+      // 클립보드에 기본 복사
+      const shareText = `[${contiTitle || '예배 찬양'}] 회중용 악보 뷰어\n(소그룹용으로 50명 이상 접속 시 뷰어가 제한됩니다)\n${url}`;
+      navigator.clipboard.writeText(shareText).catch(() => {});
+    } catch (e: any) {
+      console.error('[LeaderViewer] Congregation share error:', e);
+      alert('회중 링크 생성 중 오류: ' + (e.message || ''));
+    } finally {
+      setIsPublishingCongregation(false);
+    }
+  };
   
   // 인도자용 뷰어에 표시할 항목 (화면에 배치된 항목들만)
   const visibleItems = contiItems.filter(item => item.isVisible);
@@ -117,18 +185,9 @@ export const LeaderViewer: React.FC<LeaderViewerProps> = ({ onClose, onOpenLibra
         hymnalApi.writeClipboard(shareText);
         setGenFileId(result.fileId || null);
         setGenResultUrl(result.url); // 결과 URL 세팅 (자동으로 완료 UI 노출)
-      } else if (result.message === 'Need Auth' || result.message?.includes('authenticated')) {
-        setIsGenerating(false);
-        const { gdriveWebService } = await import('../../api/gdriveWebService');
-        const loginSuccess = await gdriveWebService.login();
-        if (loginSuccess) {
-          alert('구글 드라이브 인증이 완료되었습니다! 다시 [PDF 생성]을 눌러주세요.');
-        } else {
-          alert('구글 인증이 완료되지 않았습니다.');
-        }
       } else {
         setIsGenerating(false);
-        alert(`생성 실패: ${result.message}`);
+        alert(`PDF 생성 실패: ${result.message || '다시 시도해주세요.'}`);
       }
     } catch (err: any) {
       setIsGenerating(false);
@@ -272,23 +331,29 @@ export const LeaderViewer: React.FC<LeaderViewerProps> = ({ onClose, onOpenLibra
                     />
                   </div>
                   
+                  {/* 회중용 실시간 웹 뷰어 링크 발행 및 카톡 공유 버튼 */}
+                  <button
+                    onClick={handleOpenCongregationShare}
+                    disabled={isPublishingCongregation}
+                    className="flex items-center gap-1.5 px-2.5 py-1 bg-[#FEE500] hover:bg-[#FDD800] text-[#191919] rounded-md text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                    title="소그룹용 회중 전용 웹 뷰어 카톡 전송 및 링크 복사"
+                  >
+                    {isPublishingCongregation ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Users className="w-3.5 h-3.5 stroke-[2.2px]" />
+                    )}
+                    <span>회중 뷰어 링크</span>
+                  </button>
+
                   <button
                     onClick={() => handleGeneratePDF('leader')}
                     disabled={isGenerating}
                     className="flex items-center gap-1 px-2 py-1 hover:bg-[#EBE5DC] text-[#D97757] rounded-md text-xs font-medium transition-colors cursor-pointer"
-                    title="멘트가 포함된 인도자용 PDF 생성"
+                    title="멘트가 포함된 인도자용 PDF 다운로드"
                   >
                     <FileText className="w-3 h-3 stroke-[1.8px]" />
                     <span>PDF(인도자)</span>
-                  </button>
-                  <button
-                    onClick={() => handleGeneratePDF('congregation')}
-                    disabled={isGenerating}
-                    className="flex items-center gap-1 px-2 py-1 hover:bg-[#EBE5DC] text-[#4A4741] hover:text-[#2B2927] rounded-md text-xs font-medium transition-colors cursor-pointer"
-                    title="악보만 있는 회중용 PDF 생성"
-                  >
-                    <Users className="w-3 h-3 stroke-[1.8px]" />
-                    <span>PDF(회중)</span>
                   </button>
                 </div>
 
@@ -374,7 +439,7 @@ export const LeaderViewer: React.FC<LeaderViewerProps> = ({ onClose, onOpenLibra
                 {(!blobUrls[currentSong?.id || ''] && (currentSong?.fileId || currentSong?.filePath)?.length > 20 && !(currentSong?.fileId || currentSong?.filePath)?.startsWith('/')) ? (
                   <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#FAF9F5] text-[#2B2927]">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#D97757] mb-2"></div>
-                    <span className="text-xs font-medium text-[#6A6864]">구글 드라이브 원본을 불러오는 중...</span>
+                    <span className="text-xs font-medium text-[#6A6864]">악보 원본을 불러오는 중...</span>
                   </div>
                 ) : (
                   <div className="absolute inset-2.5 sm:inset-3.5 overflow-hidden">
@@ -494,13 +559,13 @@ export const LeaderViewer: React.FC<LeaderViewerProps> = ({ onClose, onOpenLibra
               </div>
               <h3 className="font-serif text-lg font-bold text-[#2B2927] mb-1">생성 완료!</h3>
               <p className="text-[#6A6864] text-xs leading-relaxed mb-5">
-                모바일 PDF가 구글 드라이브에 안전하게 저장되었습니다.<br/>
+                모바일 PDF 생성이 완료되었습니다.<br/>
                 <span className="text-[#D97757] font-semibold">[{contiTitle || '콘티'}] 링크가 복사되었습니다.</span>
               </p>
 
               {/* 링크 주소 표시 영역 */}
               <div className="bg-[#FAF9F5] border border-[#E5E0D8] rounded-xl p-3 mb-5 group relative text-left">
-                <p className="text-[10px] text-[#8C877D] uppercase tracking-wider font-semibold mb-1">Drive Link</p>
+                <p className="text-[10px] text-[#8C877D] uppercase tracking-wider font-semibold mb-1">Share Link</p>
                 <p className="text-xs text-[#D97757] font-mono break-all line-clamp-2 leading-tight">
                   {genResultUrl}
                 </p>
@@ -517,10 +582,17 @@ export const LeaderViewer: React.FC<LeaderViewerProps> = ({ onClose, onOpenLibra
               </div>
 
               {/* 로컬 직접 다운로드 지원 버튼 */}
-              {genFileId && (
+              {(genResultUrl || genFileId) && (
                 <button
                   onClick={() => {
-                    window.open(`https://drive.google.com/uc?export=download&id=${genFileId}`, '_blank');
+                    if (genResultUrl && (genResultUrl.startsWith('blob:') || genResultUrl.startsWith('http'))) {
+                      const link = document.createElement('a');
+                      link.href = genResultUrl;
+                      link.download = `[모바일]_${contiTitle || '찬양콘티'}.pdf`;
+                      link.click();
+                    } else if (genFileId) {
+                      window.open(`https://drive.google.com/uc?export=download&id=${genFileId}`, '_blank');
+                    }
                   }}
                   className="w-full mb-2.5 py-2.5 bg-[#FAF0EB] hover:bg-[#FAF0EB]/80 text-[#D97757] border border-[#F1D3C6] rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
                 >
@@ -535,6 +607,105 @@ export const LeaderViewer: React.FC<LeaderViewerProps> = ({ onClose, onOpenLibra
                   setIsGenerating(false);
                 }}
                 className="w-full py-2.5 bg-[#D97757] hover:bg-[#C96442] text-white rounded-xl text-xs font-semibold transition-colors shadow-2xs cursor-pointer"
+              >
+                닫기
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* 회중용 웹 뷰어 링크 공유 모달 */}
+        {showCongregationModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[10000] bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 text-center"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              className="bg-white border border-[#E5E0D8] rounded-3xl p-6 sm:p-8 max-w-sm w-full shadow-2xl text-left"
+            >
+              <div className="w-12 h-12 bg-[#FAF0EB] text-[#D97757] border border-[#F1D3C6] rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-2xs">
+                <Users className="w-6 h-6 stroke-[2.2px]" />
+              </div>
+
+              <h3 className="font-serif text-lg font-bold text-[#2B2927] text-center mb-1">
+                회중용 뷰어 준비 완료!
+              </h3>
+              <p className="text-[#6A6864] text-xs text-center leading-relaxed mb-4">
+                성도들이 스마트폰에서 바로 볼 수 있는<br/>
+                <span className="text-[#D97757] font-semibold">[{contiTitle || '찬양 콘티'}] 웹 뷰어 링크</span>가 생성되었습니다.
+              </p>
+
+              {/* 필수 요청 안내 박스: 소그룹용 50명 제한 */}
+              <div className="bg-[#FAF3F0] border border-[#EAC9BE] rounded-xl p-3 mb-4 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-[#D97757] shrink-0 mt-0.5" />
+                <p className="text-[11px] font-semibold text-[#8C3A23] leading-tight">
+                  소그룹용으로 50명 이상 접속 시 뷰어가 제한됩니다.
+                </p>
+              </div>
+
+              {/* 링크 주소창 */}
+              <div className="bg-[#FAF9F5] border border-[#E5E0D8] rounded-xl p-3 mb-4">
+                <p className="text-[10px] text-[#8C877D] uppercase tracking-wider font-semibold mb-1">Share URL</p>
+                <p className="text-xs text-[#D97757] font-mono break-all line-clamp-2 leading-tight">
+                  {congregationUrl}
+                </p>
+              </div>
+
+              {/* 카카오톡 공유 버튼 */}
+              <button
+                onClick={() => {
+                  const shared = shareInviteViaKakao({
+                    inviteUrl: congregationUrl,
+                    userName: communityName,
+                    appName: 'NATIONS STUDIO',
+                    title: `[${communityName}] ${contiTitle || '예배 찬양'} 회중용 악보`,
+                    description: '링크를 누르면 스마트폰 전체화면으로 악보를 편리하게 보실 수 있습니다. (소그룹용)',
+                  });
+                  if (!shared) {
+                    const shareText = `[${contiTitle || '예배 찬양'}] 회중용 악보 뷰어\n(소그룹용으로 50명 이상 접속 시 뷰어가 제한됩니다)\n${congregationUrl}`;
+                    navigator.clipboard.writeText(shareText);
+                    setIsCopiedCongregation(true);
+                    setTimeout(() => setIsCopiedCongregation(false), 2000);
+                  }
+                }}
+                className="w-full mb-2 py-2.5 bg-[#FEE500] hover:bg-[#FDD800] text-[#191919] rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-2xs cursor-pointer"
+              >
+                <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="#191919">
+                  <path d="M12 3C6.477 3 2 6.463 2 10.735c0 2.78 1.884 5.217 4.716 6.578-.154.557-.991 3.588-1.028 3.816-.047.29.106.286.224.208.092-.06 3.658-2.482 5.134-3.489.312.031.63.047.954.047 5.523 0 10-3.463 10-7.735S17.523 3 12 3z" />
+                </svg>
+                <span>카카오톡으로 회중에게 전송</span>
+              </button>
+
+              {/* 링크 복사 버튼 */}
+              <button
+                onClick={() => {
+                  const shareText = `[${contiTitle || '예배 찬양'}] 회중용 악보 뷰어\n(소그룹용으로 50명 이상 접속 시 뷰어가 제한됩니다)\n${congregationUrl}`;
+                  navigator.clipboard.writeText(shareText);
+                  setIsCopiedCongregation(true);
+                  setTimeout(() => setIsCopiedCongregation(false), 2000);
+                }}
+                className="w-full mb-2 py-2.5 bg-[#FAF0EB] hover:bg-[#F7E5DB] text-[#D97757] border border-[#F1D3C6] rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                {isCopiedCongregation ? <Check className="w-3.5 h-3.5 text-[#2E7D32]" /> : <Share2 className="w-3.5 h-3.5" />}
+                <span>{isCopiedCongregation ? '링크 복사 완료!' : '회중 링크 복사'}</span>
+              </button>
+
+              {/* 직접 새 창으로 확인하기 버튼 */}
+              <button
+                onClick={() => window.open(congregationUrl, '_blank')}
+                className="w-full mb-2 py-2 bg-transparent hover:bg-[#F3EFE9] text-[#6A6864] rounded-xl text-xs font-medium transition-colors flex items-center justify-center gap-1 cursor-pointer"
+              >
+                <ExternalLink className="w-3 h-3" />
+                <span>새 창에서 뷰어 미리보기</span>
+              </button>
+
+              <button
+                onClick={() => setShowCongregationModal(false)}
+                className="w-full py-2.5 bg-[#2B2927] hover:bg-[#1C1A18] text-white rounded-xl text-xs font-semibold transition-colors shadow-2xs cursor-pointer mt-1"
               >
                 닫기
               </button>

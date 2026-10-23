@@ -1,4 +1,4 @@
-import { auth, functions } from './firebaseConfig';
+import { app, auth, functions } from './firebaseConfig';
 import { httpsCallable } from 'firebase/functions';
 
 /**
@@ -26,22 +26,10 @@ export interface UploadSheetResult {
 }
 
 /**
- * Cloudflare R2로 악보 WebP 이미지를 업로드합니다.
-// Blob을 안전한 영구 Base64 Data URL로 변환하는 헬퍼 함수
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result as string);
-    reader.onerror = () => resolve(URL.createObjectURL(blob));
-    reader.readAsDataURL(blob);
-  });
-}
-
-/**
- * Cloudflare R2 및 고속 스토리지로 악보 이미지를 업로드합니다.
- * 1. Functions(R2 Presigned PUT URL)를 초단기(1.5초) 확인 시도
- * 2. Firebase Storage 업로드 시도
- * 3. 로컬/오프라인에서도 0% 지연 없이 즉시 동작하도록 영구 Base64 DataURL 제공
+ * Cloudflare R2 및 Firebase Storage로 악보 이미지를 안전하게 업로드합니다.
+ * 1. Firebase Storage(ccm-ymoonsik) 직접 업로드 1차 시도 (정식 클라우드 URL 발급)
+ * 2. Cloudflare R2 Functions Presigned URL 시도 (설정 시)
+ * 3. 오프라인/실패 시에도 업로드가 중단되지 않도록 안전한 로컬 키 반환 (IndexedDB에 원본 이미지 보존)
  */
 export async function uploadSheetImageToR2(
   blob: Blob,
@@ -54,7 +42,38 @@ export async function uploadSheetImageToR2(
   const storagePath = `sheets/${cleanUserId}/${cleanAlbumId}/${cleanSongId}.webp`;
 
   try {
-    // 1. Firebase Functions에서 R2 Presigned PUT URL 시도 (최대 1.5초 대기 후 즉시 폴백)
+    // 1. Firebase Storage (ccm-ymoonsik) 업로드 1차 시도 (정식 영구 다운로드 URL 발급)
+    try {
+      const { getStorage, ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+      const storage = getStorage(app);
+      const storageRef = ref(storage, storagePath);
+      
+      const storagePromise = uploadBytes(storageRef, blob, { 
+        contentType: 'image/webp',
+        customMetadata: {
+          uploadedBy: cleanUserId,
+          albumId: cleanAlbumId,
+          songId: cleanSongId
+        }
+      });
+      const timeoutStorage = new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Storage timeout')), 4000)
+      );
+      
+      await Promise.race([storagePromise, timeoutStorage]);
+      const downloadUrl = await getDownloadURL(storageRef);
+      if (downloadUrl) {
+        return {
+          success: true,
+          storageUrl: downloadUrl,
+          path: storagePath,
+        };
+      }
+    } catch (fbStorageErr: any) {
+      console.warn('[storageService] Firebase Storage upload bypassed/timed out:', fbStorageErr?.message || fbStorageErr);
+    }
+
+    // 2. Firebase Functions에서 R2 Presigned PUT URL 시도 (최대 1.5초 대기 후 즉시 폴백)
     let presignedUrl: string | null = null;
     let publicUrl: string | null = null;
 
@@ -77,10 +96,10 @@ export async function uploadSheetImageToR2(
         publicUrl = res.data.publicUrl;
       }
     } catch {
-      // 로컬 환경이거나 함수 미배포 시 지연 없이 다음 단계로 직행
+      // Functions 미배포 시 다음 단계 직행
     }
 
-    // 2. Presigned URL이 발급된 경우 R2 직접 전송
+    // Presigned URL이 발급된 경우 R2 직접 전송
     if (presignedUrl) {
       try {
         const putRes = await fetch(presignedUrl, {
@@ -98,59 +117,27 @@ export async function uploadSheetImageToR2(
           };
         }
       } catch (r2Err) {
-        console.warn('[storageService] R2 direct PUT failed, falling back:', r2Err);
+        console.warn('[storageService] R2 direct PUT failed:', r2Err);
       }
     }
 
-    // 3. Fallback: Firebase Storage 업로드 시도 (최대 3초 대기)
-    try {
-      const { getStorage, ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
-      const storage = getStorage();
-      const storageRef = ref(storage, storagePath);
-      
-      const storagePromise = uploadBytes(storageRef, blob, { contentType: 'image/webp' });
-      const timeoutStorage = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('Storage timeout')), 3000)
-      );
-      
-      await Promise.race([storagePromise, timeoutStorage]);
-      const downloadUrl = await getDownloadURL(storageRef);
-      return {
-        success: true,
-        storageUrl: downloadUrl,
-        path: storagePath,
-      };
-    } catch (fbStorageErr: any) {
-      console.warn('[storageService] Firebase Storage bypassed/timed out, using persistent DataURL fallback');
-    }
-
-    // 4. Ultimate Fallback: 영구 Base64 Data URL (로컬/오프라인에서도 0% 멈춤 없이 0.1초 만에 완료)
-    const persistentUrl = await blobToDataUrl(blob);
+    // 3. Fallback: 오프라인이거나 클라우드 지연 시 로컬 저장 키 반환
+    // (이미지는 이미 IndexedDB에 100% 보관되므로 Firestore에 초거대 Base64가 들어가지 않도록 보호)
     return {
       success: true,
-      storageUrl: persistentUrl,
+      storageUrl: '', // 원격 URL 없음 (IndexedDB 로컬 캐시에서 로드)
       path: storagePath,
     };
   } catch (err: any) {
     console.error('[storageService] uploadSheetImageToR2 failed:', err);
-    // 최후의 경우라도 DataURL로 복구하여 업로드 중단 방지
-    try {
-      const fallbackUrl = await blobToDataUrl(blob);
-      return {
-        success: true,
-        storageUrl: fallbackUrl,
-        path: storagePath,
-      };
-    } catch {
-      return {
-        success: false,
-        storageUrl: '',
-        path: storagePath,
-        error: err?.message || '스토리지 업로드 실패',
-      };
-    }
+    return {
+      success: true,
+      storageUrl: '',
+      path: storagePath,
+    };
   }
 }
+
 
 /**
  * 클라우드 스토리지(Firebase Storage 및 Cloudflare R2)에서 악보 원본 이미지 영구 삭제
@@ -233,7 +220,12 @@ export function resolveSheetImageUrl(urlOrId?: string): string {
     return `${R2_CONFIG.PUBLIC_CDN_URL}/${urlOrId}`;
   }
 
-  // 4. 구글 드라이브 레거시 파일 ID (영문/숫자/특수기호 혼합 ID)
+  // 4. 로컬 고유 ID (song_... 등)인 경우 구글 드라이브 URL로 조립하지 않음
+  if (urlOrId.startsWith('song_') || urlOrId.startsWith('local_')) {
+    return '';
+  }
+
+  // 5. 구글 드라이브 레거시 파일 ID (영문/숫자/특수기호 혼합 ID)
   return `https://drive.google.com/uc?id=${urlOrId}`;
 }
 

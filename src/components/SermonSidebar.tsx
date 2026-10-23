@@ -73,25 +73,39 @@ export const SermonSidebar = forwardRef<SermonSidebarRef, SermonSidebarProps>(({
 
   useEffect(() => {
     const handleAuth = async () => {
-      const { gdriveWebService } = await import('../api/gdriveWebService');
-      const token = gdriveWebService.getAccessToken();
-      if (!token || token === 'mock_local_token_123') {
-        if (auth.currentUser?.uid) {
-          setGoogleUserId(auth.currentUser.uid);
-          subscribeToSermons(auth.currentUser.uid);
-        }
-        return;
+      let uid = auth.currentUser?.uid || null;
+
+      if (!uid) {
+        try {
+          const { gdriveWebService } = await import('../api/gdriveWebService');
+          const token = gdriveWebService.getAccessToken();
+          if (token && token !== 'mock_local_token_123') {
+            const profile = await fetchUserProfile(token);
+            if (profile?.id) uid = profile.id;
+          }
+        } catch {}
       }
-      const profile = await fetchUserProfile(token);
-      if (profile && profile.id) {
-        setGoogleUserId(profile.id);
-        subscribeToSermons(profile.id);
+
+      if (!uid) {
+        try {
+          const offline = localStorage.getItem('offline_user_profile');
+          if (offline) uid = JSON.parse(offline)?.uid || null;
+        } catch {}
+      }
+
+      if (uid) {
+        setGoogleUserId(uid);
+        subscribeToSermons(uid);
       }
     };
+
     window.addEventListener('gdrive_authenticated', handleAuth);
+    const unsubAuth = auth.onAuthStateChanged(() => handleAuth());
     handleAuth();
+
     return () => {
       window.removeEventListener('gdrive_authenticated', handleAuth);
+      unsubAuth();
       if (unsubscribeSermonsRef.current) unsubscribeSermonsRef.current();
     };
   }, []);

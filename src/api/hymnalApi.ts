@@ -501,7 +501,11 @@ export const hymnalApi = {
         return { success: false, error: '악보 없음' };
       }
 
+      const cleanAlbumName = albumName || (mode === 'all' ? '전체악보' : (mode === 'misc' ? '미분류' : mode));
+
       // 엑셀 시트 데이터 생성 (사용자가 편집하기 쉬운 표준 한글 컬럼)
+      // 1. 송폼 제거 (콘티에서 실시간 지정)
+      // 2. 앨범ID 대신 앱에 표시되는 앨범 이름 및 주의 문구 표기
       const excelRows = targetSongs.map((s: any, idx: number) => ({
         '악보ID(수정금지)': s.id || '',
         '번호': s.number || idx + 1,
@@ -509,28 +513,25 @@ export const hymnalApi = {
         '코드': s.code || '',
         '박자': s.meter || '',
         '분류': s.category || '',
-        '송폼': s.songForm || '',
         '가사': s.lyrics || '',
-        '앨범ID': s.albumId || mode
+        '앨범명 (주의: 반드시 해당 앨범에 업로드하세요)': cleanAlbumName
       }));
 
       const worksheet = XLSX.utils.json_to_sheet(excelRows);
       worksheet['!cols'] = [
-        { wch: 22 }, // ID
+        { wch: 24 }, // 악보ID(수정금지)
         { wch: 8 },  // 번호
-        { wch: 28 }, // 제목
+        { wch: 30 }, // 곡제목
         { wch: 10 }, // 코드
         { wch: 10 }, // 박자
         { wch: 14 }, // 분류
-        { wch: 25 }, // 송폼
         { wch: 50 }, // 가사
-        { wch: 15 }, // 앨범ID
+        { wch: 42 }, // 앨범명 (주의: 반드시 해당 앨범에 업로드하세요)
       ];
 
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, '악보목록');
 
-      const cleanAlbumName = albumName || (mode === 'all' ? '전체악보' : (mode === 'misc' ? '미분류' : mode));
       XLSX.writeFile(workbook, `[네이션스스튜디오]_${cleanAlbumName}_악보데이터.xlsx`);
       return { success: true };
     } catch (e: any) {
@@ -541,7 +542,7 @@ export const hymnalApi = {
 
   /**
    * 엑셀 파일(.xlsx, .xls, .csv) 업로드하여 악보 제목/가사/코드 일괄 갱신
-   * @param targetAlbumId 업로드 대상 특정 앨범 ID (지정 시 엑셀 내 앨범 정보와 무관하게 해당 앨범으로 지정/갱신)
+   * @param targetAlbumId 업로드 대상 특정 앨범 ID
    */
   importExcel: async (targetAlbumId?: string) => {
     return new Promise<{ success: boolean; count?: number; error?: string }>((resolve) => {
@@ -568,6 +569,9 @@ export const hymnalApi = {
             return;
           }
 
+          // 기존 곡 목록을 조회하여 기존 이미지 경로, 앨범 등 안전 보존
+          const currentSongs = await hymnalApi.getSongs();
+
           let count = 0;
           for (const row of rows) {
             const id = row['악보ID(수정금지)'] || row['id'] || row['ID'];
@@ -576,21 +580,27 @@ export const hymnalApi = {
             const code = row['코드'] || row['code'] || '';
             const meter = row['박자'] || row['meter'] || '';
             const category = row['분류'] || row['category'] || '';
-            const songForm = row['송폼'] || row['songForm'] || '';
             const lyrics = row['가사'] || row['lyrics'] || '';
-            const albumId = targetAlbumId || row['앨범ID'] || row['albumId'] || 'misc';
+
+            // 기존 곡이 있으면 정보 유지
+            const existingSong = id ? currentSongs.find((s: any) => s.id === id) : null;
+            const albumId = targetAlbumId || existingSong?.albumId || row['앨범ID'] || row['albumId'] || 'misc';
 
             if (id || title) {
               const songData: any = {
                 id: id || `song_${Date.now()}_${count}`,
-                title: title || '무제',
-                number: number || count + 1,
-                code,
-                meter,
-                category,
-                songForm,
-                lyrics,
+                title: title || existingSong?.title || '무제',
+                number: number || existingSong?.number || count + 1,
+                code: code !== undefined ? code : (existingSong?.code || ''),
+                meter: meter !== undefined ? meter : (existingSong?.meter || ''),
+                category: category !== undefined ? category : (existingSong?.category || ''),
+                lyrics: lyrics !== undefined ? lyrics : (existingSong?.lyrics || ''),
                 albumId,
+                filePath: existingSong?.filePath || '',
+                fileId: existingSong?.fileId || '',
+                storageUrl: existingSong?.storageUrl || '',
+                crop: existingSong?.crop || null,
+                youtubeVideos: existingSong?.youtubeVideos || [],
                 updatedAt: new Date().toISOString()
               };
 

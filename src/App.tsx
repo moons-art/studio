@@ -5,6 +5,7 @@ import { HymnalSidebar } from './components/Hymnal/HymnalSidebar';
 import { ContiEditor } from './components/Hymnal/ContiEditor';
 import { MobilePdfLayout } from './components/Hymnal/MobilePdfLayout';
 import { TeamShareWindow } from './components/Hymnal/TeamShareWindow';
+import { CongregationViewer } from './components/Hymnal/CongregationViewer';
 import { TooltipIcon } from './components/TooltipIcon';
 import { PanelLeft, Music, Settings, X, WifiOff, Library, Layout, RotateCcw, HelpCircle, Share2, CreditCard, Gift, User as UserIcon, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -20,10 +21,11 @@ import { PolicyViewModal, type PolicyModalType } from './components/PolicyViewMo
 const AdminModal = React.lazy(() => import('./components/AdminModal').then(m => ({ default: m.AdminModal })));
 
 const MainApp: React.FC = () => {
-  // URL 파라미터 확인 (PDF 인쇄 모드 및 찬양팀 공유 모드)
+  // URL 파라미터 확인 (PDF 인쇄 모드, 찬양팀 공유 모드, 회중 뷰어 모드)
   const params = new URLSearchParams(window.location.search);
   const isPrintMode = params.get('mode') === 'print-pdf';
   const isTeamShareMode = params.get('mode') === 'team-share' || params.get('view') === 'team';
+  const isCongregationMode = params.get('mode') === 'congregation' || params.get('view') === 'congregation';
   const initialContiId = params.get('contiId');
 
   if (isPrintMode) {
@@ -32,6 +34,10 @@ const MainApp: React.FC = () => {
 
   if (isTeamShareMode) {
     return <TeamShareWindow initialContiId={initialContiId} />;
+  }
+
+  if (isCongregationMode) {
+    return <CongregationViewer initialContiId={initialContiId} />;
   }
 
   // 구글 API 초기화
@@ -101,7 +107,9 @@ const MainApp: React.FC = () => {
     contiItems, 
     showAllTooltips, 
     setShowAllTooltips,
-    isSyncing
+    isSyncing,
+    uploadProgress,
+    isListOpen
   } = useHymnal();
 
   // 로컬 캐시 용량 상태
@@ -240,21 +248,25 @@ const MainApp: React.FC = () => {
               </div>
 
               <div className="p-3.5 h-full flex flex-col w-full overflow-x-hidden text-[#4A4741]">
-                {/* Header: STUDIO NATIONS 로고 & 닫기 버튼 */}
+                {/* Header: NATIONS STUDIO 로고 & 닫기 버튼 */}
                 <div className="flex items-center justify-between mb-3 px-1.5 pt-1 pb-2 border-b border-[#F0EBE1]">
-                  <div className="flex flex-col">
-                    <span className="font-serif font-bold text-base text-[#2B2927] tracking-tight leading-tight">STUDIO</span>
-                    <span className="font-serif font-bold text-base text-[#2B2927] tracking-tight leading-tight">NATIONS</span>
+                  <div className="flex items-center gap-2.5">
+                    <img 
+                      src="/icon.png" 
+                      alt="NATIONS STUDIO" 
+                      className="w-7 h-7 rounded-lg object-contain shadow-2xs border border-[#F0EBE1]"
+                    />
+                    <div className="flex flex-col">
+                      <span className="font-serif font-bold text-base text-[#2B2927] tracking-tight leading-tight">NATIONS</span>
+                      <span className="font-serif font-bold text-base text-[#2B2927] tracking-tight leading-tight">STUDIO</span>
+                    </div>
                   </div>
                   <div className="flex items-center gap-1">
-                    <div className="w-7 h-7 rounded-lg bg-[#FAF0EB] border border-[#F1D3C6] flex items-center justify-center">
-                      <Music className="w-3.5 h-3.5 text-[#C96442] stroke-[1.8px]" />
-                    </div>
                     <button
                       onClick={() => setIsSidebarOpen(false)}
                       onMouseEnter={() => setIsSidebarOpen(false)}
                       className="p-1 rounded-lg hover:bg-[#EBE5DC] text-[#6E6A63] hover:text-[#2B2927] transition-colors cursor-pointer"
-                      title="사이드바 닫기 (마우스를 올리거나 클릭)"
+                      title="사이드바 닫기"
                     >
                       <X className="w-4 h-4 stroke-[2px]" />
                     </button>
@@ -399,7 +411,7 @@ const MainApp: React.FC = () => {
                   </div>
                 )}
 
-                {/* 4. 계정 버튼 (클릭 시 세르몬 앱 스타일 계정 모달 오픈) */}
+                {/* 4. 계정 버튼 (클릭 시 계정 모달 오픈) */}
                 <button
                   type="button"
                   onClick={() => {
@@ -411,58 +423,6 @@ const MainApp: React.FC = () => {
                   <UserIcon className="w-4 h-4 stroke-[1.5px] text-[#6E6A63]" />
                   <span className="text-xs font-normal">계정</span>
                 </button>
-
-                {/* 5. 네이션스 솔루션 & 1:1 문의 & 약관 푸터 */}
-                <div className="pt-2 border-t border-[#F0EBE1] px-1 space-y-1.5 text-[10px] text-[#A39E94]">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="font-medium text-[#7D786F] shrink-0">네이션스 솔루션</span>
-                    <a
-                      href="http://pf.kakao.com/_cxjBxaX/chat"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FEE500] hover:bg-[#FDD800] text-[#3C1E1E] text-[10px] font-bold rounded-full transition-all shadow-2xs active:scale-95 shrink-0 cursor-pointer"
-                      title="1:1 채팅 문의"
-                    >
-                      <svg className="w-2.5 h-2.5 stroke-[#3C1E1E] stroke-[2.8] fill-none shrink-0" viewBox="0 0 24 24">
-                        <path d="M12 3c-5.52 0-10 3.58-10 8 0 2.87 1.89 5.4 4.77 6.77l-1.2 4.43c-.11.41.34.75.7.53l5.24-3.48c.16.01.32.02.49.02 5.52 0 10-3.58 10-8s-4.48-8-10-8z" />
-                      </svg>
-                      <span>1:1 문의</span>
-                    </a>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-[#8C877D] flex-wrap text-[10px]">
-                    <button
-                      type="button"
-                      onClick={() => setPolicyModal({ isOpen: true, tab: 'terms' })}
-                      className="hover:text-[#C46A40] hover:underline cursor-pointer"
-                    >
-                      이용약관
-                    </button>
-                    <span>•</span>
-                    <button
-                      type="button"
-                      onClick={() => setPolicyModal({ isOpen: true, tab: 'privacy' })}
-                      className="hover:text-[#C46A40] hover:underline cursor-pointer"
-                    >
-                      개인정보처리방침
-                    </button>
-                    <span>•</span>
-                    <button
-                      type="button"
-                      onClick={() => setPolicyModal({ isOpen: true, tab: 'business' })}
-                      className="hover:text-[#C46A40] hover:underline cursor-pointer"
-                    >
-                      사업자정보
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between text-[9px] text-[#A39E94] pt-1 border-t border-[#F0EBE1]">
-                    <span className="font-mono text-[#8C877D]">v1.1</span>
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                      <span className="text-[#8C877D]">서버 최신 동기화</span>
-                    </div>
-                  </div>
-                </div>
               </div>
             </div>
           </motion.aside>
@@ -472,18 +432,44 @@ const MainApp: React.FC = () => {
 
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header - 플랫한 에디토리얼 상단바 (카드 스타일 X, 아이콘+글자) */}
-        <header className="min-h-12 border-b border-[#E7E5DF] flex items-center px-3 md:px-5 py-2 gap-4 bg-white/95 backdrop-blur-md sticky top-0 z-30 overflow-x-auto custom-scrollbar flex-row">
-          {/* 사이드바 토글 버튼 (클릭 시 열기/닫기) */}
-          <div className="flex items-center gap-1 shrink-0">
+        <header className="min-h-12 border-b border-[#E7E5DF] flex items-center px-3 md:px-5 py-2 gap-4 bg-white/95 backdrop-blur-md sticky top-0 z-30 overflow-x-auto custom-scrollbar flex-row relative">
+          {/* 사이드바 토글 버튼 (악보목록이 열렸을 때 악보뷰 패널 상단 왼쪽으로 부드럽게 이동) */}
+          <div 
+            style={{ 
+              marginLeft: isListOpen ? 'clamp(260px, 22vw, 320px)' : '0px' 
+            }}
+            className="flex items-center gap-1 shrink-0 transition-all duration-300 ease-in-out"
+          >
             <button 
               onClick={() => setIsSidebarOpen(prev => !prev)}
-              onMouseEnter={() => setIsSidebarOpen(true)}
-              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${isSidebarOpen ? 'bg-[#FAF0EB] text-[#C96442]' : 'hover:bg-[#F3EFE9] text-[#6E6A63] hover:text-[#2B2927]'}`}
-              title={isSidebarOpen ? "사이드바 닫기" : "사이드바 열기 (마우스를 올리거나 클릭)"}
+              onMouseEnter={() => { if (!isSidebarOpen) setIsSidebarOpen(true); }}
+              className={`p-2 rounded-xl transition-all cursor-pointer ${
+                isSidebarOpen 
+                  ? 'bg-[#FAF0EB] text-[#C96442]' 
+                  : 'hover:bg-[#F3EFE9] text-[#6E6A63] hover:text-[#2B2927]'
+              }`}
+              title={isSidebarOpen ? "사이드바 닫기" : "사이드바 열기 (마우스를 올리면 열립니다)"}
             >
-              <PanelLeft className="w-4 h-4 stroke-[1.8px]" />
+              <PanelLeft className="w-[21px] h-[21px] stroke-[1.8px]" />
             </button>
           </div>
+
+          {/* 사이드바 밖에서도 실시간 확인 가능한 글로벌 업로드 진행 가로바 */}
+          {uploadProgress && (
+            <div className="flex items-center gap-2 px-3 py-1 bg-[#FAF9F5] border border-[#E8E2D9] rounded-xl shadow-2xs animate-in fade-in duration-200">
+              <span className="w-2 h-2 rounded-full bg-black animate-ping" />
+              <span className="text-xs font-bold text-black tracking-tight">업로드 중...</span>
+              <div className="w-24 sm:w-36 h-2 bg-neutral-200 rounded-full overflow-hidden relative">
+                <div 
+                  className="h-full bg-black rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${Math.min(100, (uploadProgress.processed / uploadProgress.total) * 100)}%` }}
+                />
+              </div>
+              <span className="text-xs font-extrabold text-black bg-neutral-100 px-1.5 py-0.5 rounded border border-neutral-300">
+                {uploadProgress.processed} / {uploadProgress.total} ({Math.round((uploadProgress.processed / uploadProgress.total) * 100)}%)
+              </span>
+            </div>
+          )}
 
           {/* 메인 액션 버튼: 저장소, 콘티에디터, 선택취소 */}
           <div className="flex items-center gap-3 ml-auto shrink-0 flex-nowrap">
@@ -587,34 +573,32 @@ const MainApp: React.FC = () => {
                   <p className="text-xs font-semibold text-[#C96442] leading-relaxed">목사님의 사역이 이 도구를 통해 더욱 풍성해지길 기도합니다. 🕊️🙏</p>
                 </div>
 
-                {/* 구글 드라이브 클라우드 저장소 안내 섹션 */}
+                {/* 전용 클라우드 저장소 안내 섹션 */}
                 <div className="p-5 bg-white rounded-2xl border border-[#D97757]/30 shadow-2xs space-y-3">
                   <div className="flex items-center gap-2">
                     <span className="text-base">☁️</span>
-                    <h4 className="text-xs font-bold text-[#2C2B29] uppercase tracking-wide">구글 드라이브 클라우드 저장소 안내</h4>
+                    <h4 className="text-xs font-bold text-[#2C2B29] uppercase tracking-wide">네이션스 클라우드 전용 저장소 안내</h4>
                     <span className="ml-auto text-[10px] font-bold text-[#2E7D32] bg-[#EBF7EE] border border-[#C8E6C9] px-2 py-0.5 rounded-md">
-                      고화질 저용량 WebP 영구 보관
+                      초경량 고화질 WebP 영구 보관
                     </span>
                   </div>
                   <p className="text-xs text-[#4A4741] leading-relaxed">
-                    앱의 모든 악보, 콘티, 설정 데이터는 외부 서버가 아닌 <strong>로그인하신 본인의 구글 드라이브</strong>에 저용량 고화질로 영구 저장됩니다. 구글 드라이브 내에 아래와 같이 전용 폴더가 체계적으로 자동 생성되어 관리됩니다.
+                    앱의 모든 악보, 콘티, 설정 데이터는 <strong>네이션스 스튜디오의 전용 클라우드 서버</strong>에 안전하게 암호화되어 영구 저장됩니다. 구글, 카카오 등 어떤 계정으로 로그인하든 모든 기기(PC, 태블릿, 모바일)에서 동일한 내 악보 라이브러리가 실시간으로 동기화됩니다.
                   </p>
                   <div className="bg-[#FAF9F5] border border-[#E5E0D8] rounded-xl p-3 text-[11px] font-mono space-y-1.5 text-[#5C584F]">
                     <div className="flex items-center gap-2 font-bold text-[#2B2927]">
-                      <span>📁 Nations Solution/</span>
-                      <span className="font-sans font-normal text-[10px] text-[#D97757]">(구글 드라이브 최상위 단일 마스터 폴더)</span>
+                      <span>☁️ Nations Studio Cloud/</span>
+                      <span className="font-sans font-normal text-[10px] text-[#D97757]">(스튜디오 중앙 클라우드 스토리지)</span>
                     </div>
                     <div className="pl-4 space-y-1 text-[#6A6864]">
-                      <div>├── 📁 <strong>Nations Studio/</strong> <span className="font-sans text-[10px] text-[#8C877D]">- 악보 앨범, 콘티, 설정, PDF 보관함</span></div>
-                      <div className="pl-4">├── 📂 Albums/ <span className="font-sans text-[10px] text-[#8C877D]">- 새찬송가, 마커스 등 앨범별 악보 이미지</span></div>
-                      <div className="pl-4">├── 📂 PDF_Library/ <span className="font-sans text-[10px] text-[#8C877D]">- 자동 생성된 콘티 악보 PDF</span></div>
-                      <div className="pl-4">└── 📄 settings.json, saved_contis.json <span className="font-sans text-[10px] text-[#8C877D]">- 콘티 및 설정</span></div>
-                      <div>├── 📁 <strong>Nations Bible/</strong> <span className="font-sans text-[10px] text-[#8C877D]">- 성경 텍스트 데이터</span></div>
-                      <div>└── 📁 <strong>Nations Vote/</strong> <span className="font-sans text-[10px] text-[#8C877D]">- 향후 확장 서비스용</span></div>
+                      <div>├── 📂 <strong>Sheets/</strong> <span className="font-sans text-[10px] text-[#8C877D]">- 초경량 고화질 WebP 악보 원본 영구 보관</span></div>
+                      <div>├── 📂 <strong>Albums/</strong> <span className="font-sans text-[10px] text-[#8C877D]">- 새찬송가, 마커스 등 사용자별 맞춤 앨범 분류</span></div>
+                      <div>├── 📂 <strong>Contis/</strong> <span className="font-sans text-[10px] text-[#8C877D]">- 자르기 좌표, 송폼, 멘트가 포함된 예배 콘티</span></div>
+                      <div>└── 📂 <strong>Cache/</strong> <span className="font-sans text-[10px] text-[#8C877D]">- 오프라인 0초 로딩을 위한 기기 로컬 IndexedDB 캐시</span></div>
                     </div>
                   </div>
                   <p className="text-[11px] text-[#8C877D] leading-relaxed">
-                    💡 <strong>팁:</strong> 구글 드라이브에서 <strong>[Nations Solution]</strong> 폴더를 마우스 우클릭 후 공유 설정을 [링크가 있는 모든 사용자 - 뷰어]로 한 번만 설정해 두시면, 찬양팀원들이 악보와 콘티를 볼 때 권한 문제 없이 즉시 열람할 수 있습니다.
+                    💡 <strong>실시간 연동:</strong> 예배 인도자나 반주자가 콘티나 악보를 수정하면, 같은 계정으로 로그인된 보면대 태블릿이나 스마트폰에도 딜레이 없이 실시간으로 반영됩니다.
                   </p>
                 </div>
 
@@ -627,11 +611,11 @@ const MainApp: React.FC = () => {
                     </span>
                   </div>
                   <p className="text-xs text-[#6A6864] mb-4 leading-relaxed">
-                    해당 앱은 모든 악보를 구글 드라이브에 저장하여 불러옵니다. 빠른 앱의 구동을 위해 한번 읽은 악보는 기기의 캐쉬에 저장됩니다. 기기의 저장 공간을 확보하고 싶을때 로컬캐시 관리를 실행하여 삭제 하십시오. 구글 드라이브의 원본악보와 앱의 모든 앨범과 설정은 삭제되지 않고 안전하게 보호 됩니다.
+                    빠른 앱 구동과 예배 중 오프라인 연주를 위해 한 번 열람한 악보는 기기의 로컬 캐시(IndexedDB)에 자동 보관됩니다. 기기의 저장 공간을 확보하고 싶을 때 로컬 캐시를 삭제하십시오. 클라우드 서버의 원본 악보와 앨범/콘티 설정은 삭제되지 않고 안전하게 보존됩니다.
                   </p>
                   <button
                     onClick={async () => {
-                      if (confirm('기기에 저장된 모든 악보 캐시를 삭제하시겠습니까? \n삭제 후 악보를 열 때 구글 드라이브에서 다시 새로 다운로드합니다.')) {
+                      if (confirm('기기에 저장된 모든 악보 로컬 캐시를 삭제하시겠습니까? \n삭제 후 악보를 열 때 클라우드 서버에서 다시 새로 다운로드합니다.')) {
                         try {
                           const { imageCache } = await import('./utils/imageCache');
                           await imageCache.clearCache();
@@ -683,7 +667,7 @@ const MainApp: React.FC = () => {
                       악보 및 클라우드 연동 안내
                     </h3>
                     <div className="bg-[#F5F3ED] p-4 rounded-2xl text-xs text-[#6A6864] leading-relaxed border border-[#E7E5DF] space-y-2">
-                      <p>- PC, 모바일에서 업로드한 악보는 본인 구글 드라이브에 안전하게 보관되며 모든 기기에서 실시간 동기화됩니다.</p>
+                      <p>- PC, 모바일에서 업로드한 악보는 전용 클라우드 서버에 안전하게 보관되며 모든 기기에서 실시간 동기화됩니다.</p>
                       <p>- 최초 1회 다운로드 후에는 기기 캐시에 보관되어 오프라인에서도 즉시 악보를 열람할 수 있습니다.</p>
                     </div>
                   </section>
@@ -853,6 +837,7 @@ const MainApp: React.FC = () => {
           setAuthPageSection('pricing');
           setShowAuthModal(true);
         }}
+        onOpenPolicy={(tab) => setPolicyModal({ isOpen: true, tab })}
         currentUser={auth.currentUser}
         userProfile={userProfile}
         onLogout={async () => {

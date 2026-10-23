@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useHymnal, type Album } from '../../stores/HymnalProvider';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -25,7 +25,6 @@ import { getIsHymnalVisible, getUserPlan } from '../../utils/adminConfig';
 import { auth } from '../../api/firebaseConfig';
 
 export const HymnalSidebar: React.FC = () => {
-  const [uploadProgress, setUploadProgress] = useState<{ processed: number; total: number } | null>(null);
   const uploadStartTimeRef = useRef<number | null>(null);
   const [albumNameInput, setAlbumNameInput] = useState('');
   const { 
@@ -47,7 +46,9 @@ export const HymnalSidebar: React.FC = () => {
     showAllTooltips,
     setShowAllTooltips,
     exportCSV,
-    importCSV
+    importCSV,
+    uploadProgress,
+    setUploadProgress
   } = useHymnal();
 
   useEffect(() => {
@@ -61,6 +62,23 @@ export const HymnalSidebar: React.FC = () => {
   const [userPlan, setUserPlan] = useState(getUserPlan());
   const [showAlbumSelectModal, setShowAlbumSelectModal] = useState(false);
   const [albumModalAction, setAlbumModalAction] = useState<'add_song' | 'excel_download' | 'excel_upload'>('add_song');
+
+  // 앨범별 곡 수 실시간 집계
+  const albumSongCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    let totalCount = 0;
+    songs.forEach((s) => {
+      // 찬송가가 비활성화된 경우 찬송가(hymnal) 곡은 전체 수에서도 제외
+      if (!isHymnalVisible && (s.albumId === 'hymnal' || (!s.albumId && s.id?.startsWith('hymnal_')))) {
+        return;
+      }
+      totalCount++;
+      const aId = s.albumId || 'misc';
+      map.set(aId, (map.get(aId) || 0) + 1);
+    });
+    map.set('all', totalCount);
+    return map;
+  }, [songs, isHymnalVisible]);
 
   useEffect(() => {
     const handleConfigChange = () => {
@@ -87,12 +105,12 @@ export const HymnalSidebar: React.FC = () => {
 
   const isFreeUser = userPlan === 'free';
 
-  const isAuthenticated = !!(auth.currentUser || localStorage.getItem('gdrive_token') || localStorage.getItem('nations_recent_login_provider'));
+  const isAuthenticated = !!(auth.currentUser || localStorage.getItem('gdrive_token') || localStorage.getItem('nations_recent_login_provider') || localStorage.getItem('offline_user_profile'));
 
   // 대량 앨범 업로드 처리
   const handleAlbumUpload = async (isHymnal: boolean = false, targetAlbum?: Album) => {
     if (!isAuthenticated) {
-      alert('악보를 추가하려면 구글 계정으로 로그인해야 합니다. 왼쪽 사이드바 상단에서 로그인해 주세요.');
+      alert('악보를 추가하려면 먼저 로그인해야 합니다. 왼쪽 사이드바 상단에서 로그인해 주세요.');
       return;
     }
     try {
@@ -134,8 +152,13 @@ export const HymnalSidebar: React.FC = () => {
       if (!albums.find(a => a.id === albumId)) {
         const newAlbums = [...albums, { id: albumId, name: albumName }];
         setAlbums(newAlbums);
-        const { gdriveWebService } = await import('../../api/gdriveWebService');
-        await gdriveWebService.uploadJsonFile('settings.json', { albums: newAlbums });
+        await hymnalApi.saveSettings({ albums: newAlbums });
+        try {
+          const { gdriveWebService } = await import('../../api/gdriveWebService');
+          if (gdriveWebService.getAccessToken()) {
+            await gdriveWebService.uploadJsonFile('settings.json', { albums: newAlbums });
+          }
+        } catch {}
       }
 
       // 4. 즉각적인 UI 반영 (구글 드라이브 검색 색인 지연 우회)
@@ -263,7 +286,10 @@ export const HymnalSidebar: React.FC = () => {
         <div className="text-[11px] font-medium text-[#8C877D] px-1 mb-1.5 flex items-center justify-between">
           <span>앨범목록</span>
           <span className="text-[10px] text-[#8C877D]">
-            {albums.filter(a => a.id !== 'hymnal' && a.id !== 'misc').length + (isHymnalVisible ? 3 : 2)}
+            {isFreeUser 
+              ? (isHymnalVisible ? 2 : 1) 
+              : (albums.filter(a => a.id !== 'hymnal' && a.id !== 'misc').length + 1 + (isHymnalVisible ? 1 : 0))
+            }
           </span>
         </div>
         
@@ -294,9 +320,9 @@ export const HymnalSidebar: React.FC = () => {
               </div>
             </button>
 
-            {/* 프리 사용자 안내 말풍선 (세점에 마우스 대면 노출) */}
+            {/* 프리 사용자 안내 말풍선 (메뉴 아래쪽에 노출되도록 top-full mt-2 적용) */}
             {isFreeUser && (
-              <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 hidden group-hover/addalbum:block z-50 w-56 p-2.5 bg-neutral-900 text-white text-[11px] rounded-xl shadow-xl leading-relaxed pointer-events-none animate-in fade-in zoom-in-95">
+              <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 hidden group-hover/addalbum:block z-50 w-56 p-2.5 bg-neutral-900 text-white text-[11px] rounded-xl shadow-xl leading-relaxed pointer-events-none animate-in fade-in zoom-in-95">
                 <p className="font-bold text-amber-300 mb-0.5">PRO 플랜 전용 기능</p>
                 <p className="text-neutral-300">
                   프리 플랜은 <strong>'미분류'</strong> 앨범만 이용 가능합니다. 프로/팀 플랜 업그레이드 시 앨범을 무제한 추가할 수 있습니다.
@@ -322,6 +348,9 @@ export const HymnalSidebar: React.FC = () => {
               {activeAlbumId === 'all' && <Check className="w-2.5 h-2.5 text-white stroke-[3px]" />}
             </div>
             <span className="flex-1 text-xs tracking-tight truncate leading-tight">전체</span>
+            <span className="text-[10px] font-semibold text-[#8C877D] ml-auto shrink-0 bg-[#E8E2D8]/60 px-1.5 py-0.5 rounded-md">
+              {albumSongCountMap.get('all') || 0}
+            </span>
           </div>
 
           {/* 새찬송가 (사이드바에서 완전히 가려주고, 대시보드에서 ON 시에만 열림) */}
@@ -342,6 +371,9 @@ export const HymnalSidebar: React.FC = () => {
                 {activeAlbumId === 'hymnal' && <Check className="w-2.5 h-2.5 text-white stroke-[3px]" />}
               </div>
               <span className="flex-1 text-xs tracking-tight truncate leading-tight">새찬송가</span>
+              <span className="text-[10px] font-semibold text-[#8C877D] ml-auto shrink-0 bg-[#E8E2D8]/60 px-1.5 py-0.5 rounded-md">
+                {albumSongCountMap.get('hymnal') || 0}
+              </span>
             </div>
           )}
 
@@ -362,6 +394,9 @@ export const HymnalSidebar: React.FC = () => {
               {activeAlbumId === 'misc' && <Check className="w-2.5 h-2.5 text-white stroke-[3px]" />}
             </div>
             <span className="flex-1 text-xs tracking-tight truncate leading-tight">미분류</span>
+            <span className="text-[10px] font-semibold text-[#8C877D] ml-auto shrink-0 bg-[#E8E2D8]/60 px-1.5 py-0.5 rounded-md">
+              {albumSongCountMap.get('misc') || 0}
+            </span>
           </div>
 
           {/* 그 외 개별 커스텀 앨범 목록 (프리 사용자는 미분류 1개만 보이고 커스텀 앨범 숨김) */}
@@ -385,6 +420,10 @@ export const HymnalSidebar: React.FC = () => {
               
               <span className="flex-1 text-xs tracking-tight truncate leading-tight">
                 {album.name}
+              </span>
+
+              <span className="text-[10px] font-semibold text-[#8C877D] ml-auto mr-1 shrink-0 bg-[#E8E2D8]/60 px-1.5 py-0.5 rounded-md">
+                {albumSongCountMap.get(album.id) || 0}
               </span>
 
               <button 
@@ -431,11 +470,6 @@ export const HymnalSidebar: React.FC = () => {
             <span className="flex-1 text-left">앨범에 추가</span>
             <TooltipIcon text={isUploading ? "악보 업로드가 진행 중입니다." : "악보를 추가할 앨범을 선택하여 이미지를 등록합니다."} />
           </button>
-
-          {/* 고유주황색 연한 작은 설명 글씨 */}
-          <div className="px-2.5 py-0.5 text-[11px] text-[#D97757]/85 tracking-tight font-normal leading-normal">
-            파일제목을 찬양이름으로 수정하여 악보를 올리세요
-          </div>
 
           {/* 업로드 진행 표시기: 업로드 중... 검은 얇은 가로바, %, 예상 초, 검은색 이동 점, 처리된 수/총악보수 */}
           {uploadProgress && (
@@ -522,14 +556,6 @@ export const HymnalSidebar: React.FC = () => {
             <span className="flex-1 text-left">앨범 엑셀 업로드</span>
             <TooltipIcon text={isUploading ? "업로드 중에는 엑셀 업로드가 제한됩니다." : "선택한 앨범에 악보정보를 일괄 업로드합니다."} />
           </button>
-        </div>
-
-        {/* 악보 삭제 안내 */}
-        <div className="pt-1.5 hidden md:block">
-          <div className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs font-normal text-[#8C877D] bg-[#F3EFE9]/50 border border-[#E8E2D9]">
-            <span className="flex-1 text-left text-[#D97757] font-medium">+ 악보 삭제 안내</span>
-            <TooltipIcon text="지우고 싶은 악보목록을 옆으로 밀면 삭제할수 있어요." />
-          </div>
         </div>
       </div>
 
@@ -618,7 +644,7 @@ export const HymnalSidebar: React.FC = () => {
                       <button 
                         type="button"
                         onClick={() => {
-                          exportCSV(editingAlbum.id);
+                          exportCSV(editingAlbum.id, editingAlbum.name);
                         }}
                         className="flex items-center justify-center gap-1.5 p-2.5 bg-white hover:bg-[#F3EFE9] border border-[#E5E0D8] text-[#2C2B29] rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-2xs"
                         title="이 앨범의 악보 목록(제목, 가사 등)을 엑셀로 다운로드"
@@ -630,7 +656,7 @@ export const HymnalSidebar: React.FC = () => {
                       <button 
                         type="button"
                         onClick={async () => {
-                          await importCSV();
+                          await importCSV(editingAlbum.id, editingAlbum.name);
                           setShowAlbumModal(false);
                         }}
                         className="flex items-center justify-center gap-1.5 p-2.5 bg-white hover:bg-[#F3EFE9] border border-[#E5E0D8] text-[#2C2B29] rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-2xs"
@@ -690,16 +716,20 @@ export const HymnalSidebar: React.FC = () => {
               <div className="mt-2.5 mb-4 p-3 bg-neutral-50 rounded-xl border border-neutral-200/80 text-xs text-neutral-700 space-y-1.5">
                 <div className="flex items-start gap-1.5 font-medium text-neutral-800 leading-snug">
                   <span className="text-[#D97757] font-bold shrink-0">1.</span>
-                  <span>먼저 악보를 앨범에 올린 후, 생성되는 앨범 엑셀을 다운로드 하세요</span>
+                  <span>먼저 악보를 앨범에 올리면 엑셀이 생성됩니다.</span>
                 </div>
                 <div className="flex items-start gap-1.5 font-medium text-neutral-800 leading-snug">
                   <span className="text-[#D97757] font-bold shrink-0">2.</span>
-                  <span>다운로드한 앨범 엑셀을 재편집하여 업로드 하세요</span>
+                  <span>앨범에서 엑셀을 다운로드 합니다.</span>
+                </div>
+                <div className="flex items-start gap-1.5 font-medium text-neutral-800 leading-snug">
+                  <span className="text-[#D97757] font-bold shrink-0">3.</span>
+                  <span>다운로드한 엑셀을 편집한후 다시 업로드 합니다.</span>
                 </div>
               </div>
             ) : (
               <p className="text-xs text-neutral-600 mt-2.5 mb-4 leading-relaxed">
-                {albumModalAction === 'add_song' && '악보 이미지를 저장할 앨범을 선택해 주세요.'}
+                {albumModalAction === 'add_song' && '파일 제목을 찬양이름으로 수정하여 올리세요'}
                 {albumModalAction === 'excel_download' && '선택한 앨범의 악보 정보를 엑셀로 다운로드합니다.'}
               </p>
             )}

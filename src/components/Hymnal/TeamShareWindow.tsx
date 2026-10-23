@@ -8,9 +8,11 @@ import { collection, query, orderBy, limit, onSnapshot, addDoc, deleteDoc, doc, 
 import { 
   ChevronLeft, ChevronRight, Share2, Copy, Check, MessageSquare, Send, 
   Trash2, Megaphone, Edit2, Video, Music, Radio, 
-  Eye, ScrollText, StickyNote, X, Play, Users, UserCheck, Clock, ShieldCheck, Sparkles, User, RefreshCw
+  Eye, ScrollText, StickyNote, X, Play, Users, UserCheck, Clock, ShieldCheck, Sparkles, User, RefreshCw,
+  Download, Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { generateContiPackagePDF, type PackageSongItem } from '../../utils/pdfPackageGenerator';
 
 interface CommentItem {
   id: string;
@@ -490,6 +492,57 @@ export const TeamShareWindow: React.FC<{
     setIsEditingTeamName(false);
   };
 
+  // 찬양팀 전용 악보+송폼+코드 패키지 PDF 다운로드
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [pdfProgressText, setPdfProgressText] = useState('');
+
+  const handleDownloadPdfPackage = async () => {
+    if (isGeneratingPdf || !contiSongsWithItems || contiSongsWithItems.length === 0) {
+      alert('다운로드할 악보가 콘티에 없습니다.');
+      return;
+    }
+    setIsGeneratingPdf(true);
+    setPdfProgressText('PDF 준비 중...');
+
+    try {
+      const itemsForPdf: PackageSongItem[] = contiSongsWithItems.map(({ item, song }) => ({
+        itemId: item.id,
+        songId: song?.id || item.songId,
+        title: song?.title || '제목 없음',
+        code: song?.code || '',
+        meter: song?.meter || '',
+        songForm: songForms[item.id] || song?.songForm || '',
+        filePath: song?.filePath || '',
+        fileId: song?.fileId || '',
+        crop: item.crop,
+        memo: item.memo || ''
+      }));
+
+      const pdfBlob = await generateContiPackagePDF(
+        currentConti?.title || '찬양_콘티_패키지',
+        itemsForPdf,
+        worshipTeamName,
+        (msg, percent) => {
+          setPdfProgressText(`${msg} (${percent}%)`);
+        }
+      );
+
+      const fileName = `[찬양팀]_${currentConti?.title || '콘티'}_악보패키지.pdf`;
+      const downloadUrl = URL.createObjectURL(pdfBlob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = fileName;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(downloadUrl), 10000);
+    } catch (err: any) {
+      console.error('[TeamShareWindow] PDF download error:', err);
+      alert('PDF 다운로드 중 오류가 발생했습니다: ' + (err.message || ''));
+    } finally {
+      setIsGeneratingPdf(false);
+      setPdfProgressText('');
+    }
+  };
+
 
   // 6. 글남기기 (찬양팀 소통판) 상태 - Firebase Firestore 실시간 연동
   const [comments, setComments] = useState<CommentItem[]>([]);
@@ -907,6 +960,24 @@ export const TeamShareWindow: React.FC<{
             {isCopied ? <Check className="w-3.5 h-3.5 stroke-[2px]" /> : <Copy className="w-3.5 h-3.5 stroke-[1.8px]" />}
             <span className="hidden sm:inline">{isCopied ? '접속주소 복사됨!' : '접속주소 복사'}</span>
             <span className="inline sm:hidden">{isCopied ? '복사됨' : '주소복사'}</span>
+          </button>
+
+          {/* 악보 + 송폼 + 코드 패키지 PDF 다운로드 버튼 */}
+          <button
+            onClick={handleDownloadPdfPackage}
+            disabled={isGeneratingPdf}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#FAF0EB] hover:bg-[#F7E5DB] text-[#D97757] border border-[#F1D3C6] rounded-lg text-xs font-semibold shadow-2xs transition-all cursor-pointer disabled:opacity-50"
+            title="악보, 송폼, 가사&코드 텍스트가 포함된 통합 모바일 PDF 즉석 다운로드 (서버 비용 0원)"
+          >
+            {isGeneratingPdf ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Download className="w-3.5 h-3.5 stroke-[2px]" />
+            )}
+            <span className="hidden sm:inline">
+              {isGeneratingPdf ? (pdfProgressText || 'PDF 생성 중...') : '악보 PDF 다운'}
+            </span>
+            <span className="inline sm:hidden">{isGeneratingPdf ? '생성중' : 'PDF'}</span>
           </button>
 
           {/* 뷰 모드 전환 버튼 (스크롤 ↔ 실전 뷰어) */}

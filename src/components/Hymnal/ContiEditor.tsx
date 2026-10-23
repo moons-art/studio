@@ -8,7 +8,7 @@ import {
   StickyNote, LayoutTemplate, Printer, Share2, Search, Library, FileUp,
   ChevronLeft, ChevronRight, GripVertical, Download, ImagePlus, Calendar, Hash, Layout, CheckCircle2, Check, DoorOpen, HelpCircle
 } from 'lucide-react';
-import { compressImageToWebP, uploadImageToGDrive } from '../../utils/imageProcessor';
+import { compressImageToWebP } from '../../utils/imageProcessor';
 import { gdriveWebService } from '../../api/gdriveWebService';
 import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import { SavedContisModal } from './SavedContisModal';
@@ -28,7 +28,8 @@ const SmoothSlider = memo(({
   step = 1,
   label,
   accentColor = "accent-[#D97757]",
-  unit = ""
+  unit = "",
+  widthClass = "w-14 sm:w-16"
 }: {
   value: number;
   onChange: (val: number) => void;
@@ -38,6 +39,7 @@ const SmoothSlider = memo(({
   label?: string;
   accentColor?: string;
   unit?: string;
+  widthClass?: string;
 }) => {
   const [localVal, setLocalVal] = useState(value);
   useEffect(() => { setLocalVal(value); }, [value]);
@@ -54,9 +56,9 @@ const SmoothSlider = memo(({
           setLocalVal(v);
           onChange(v);
         }} 
-        className={`w-14 sm:w-16 ${accentColor} h-1 cursor-pointer`} 
+        className={`${widthClass} ${accentColor} h-1 cursor-pointer`} 
       />
-      <span className="text-[11px] font-semibold text-[#D97757] w-6 text-center font-mono">
+      <span className="text-[11px] font-semibold text-[#D97757] w-5 text-center font-mono">
         {localVal}{unit}
       </span>
     </div>
@@ -65,7 +67,7 @@ const SmoothSlider = memo(({
 
 // --- Memoized Individual Item Component ---
 const DraggableContiItem = React.memo(({ 
-  item, 
+  item,
   song, 
   isSelected, 
   canvasWidth, 
@@ -77,58 +79,207 @@ const DraggableContiItem = React.memo(({
   onSelect,
   onUpdate,
   onRemove,
-  onCropEdit
+  onCropEdit,
+  cropEditingId
 }: any) => {
-  const [isDragging, setIsDragging] = useState(false);
   const [imageRatio, setImageRatio] = useState(1.414); // A4 ratio default
   const [localMemo, setLocalMemo] = useState(item.memo || '');
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [isResizing, setIsResizing] = useState(false);
+  const cropBoxRef = useRef<HTMLDivElement>(null);
+
+  const isCropping = isSelected && (cropEditingId === item.id);
 
   // 로컬 상태와 동기화
   useEffect(() => { setLocalMemo(item.memo || ''); }, [item.memo]);
 
-  // 구글 드라이브 이미지의 경우 안전하게 Blob으로 직접 다운로드하여 렌더링
+  // 전방위 다층 안전 이미지 로더 (모든 후보 키/ID/URL 탐색)
   useEffect(() => {
-    let isMounted = true;
-    let currentUrl: string | null = null;
-    const fileId = song?.fileId || song?.filePath || song?.filename;
-    
-    // HTTP URL, Data URL, Blob URL 또는 로컬 경로인 경우 즉시 직접 사용
-    if (fileId && (fileId.startsWith('http') || fileId.startsWith('data:') || fileId.startsWith('blob:') || fileId.startsWith('/'))) {
-      setBlobUrl(fileId);
+    let active = true;
+    let currentBlobUrl: string | null = null;
+
+    // 모든 가능한 키와 식별자 후보 수집
+    const possibleKeys = [
+      song?.fileId,
+      song?.id,
+      item?.songId,
+      song?.filePath,
+      song?.filename,
+      song?.storageUrl
+    ].filter((k): k is string => Boolean(k) && typeof k === 'string');
+
+    // 1. 이미 완전한 Data URL, Blob URL, 로컬 정적 경로(/...)인 경우 즉시 표시
+    const directUrl = possibleKeys.find(k => 
+      k.startsWith('http://') || k.startsWith('https://') || 
+      k.startsWith('data:') || k.startsWith('blob:') || k.startsWith('/')
+    );
+    if (directUrl) {
+      setBlobUrl(directUrl);
       return;
     }
-    
-    // 구글 드라이브 ID인 경우에만 다운로드 시도
-    if (fileId && fileId.length > 20) {
-      import('../../api/gdriveWebService').then(({ gdriveWebService }) => {
-        gdriveWebService.downloadImageBlob(fileId).then(url => {
-          if (isMounted && url) {
-            currentUrl = url;
-            setBlobUrl(url);
-          } else if (url) {
-            URL.revokeObjectURL(url);
-          }
-        });
-      });
+
+    if (possibleKeys.length === 0) {
+      setBlobUrl(null);
+      return;
     }
-    return () => {
-      isMounted = false;
-      // 언마운트 시 메모리 해제
-      if (currentUrl) URL.revokeObjectURL(currentUrl);
+
+    const loadImage = async () => {
+      try {
+        const { imageCache } = await import('../../utils/imageCache');
+
+        // 1단계: IndexedDB 로컬 캐시 조회 (후보 키 순차 확인)
+        for (const key of possibleKeys) {
+          try {
+            const cachedBlob = await imageCache.getImage(key);
+            if (cachedBlob && cachedBlob.size > 0 && active) {
+              const url = URL.createObjectURL(cachedBlob);
+              currentBlobUrl = url;
+              setBlobUrl(url);
+              return;
+            }
+          } catch (_) {}
+        }
+
+        // 2단계: 클라우드 스토리지 (R2 / Firebase Storage / CDN) URL fetch
+        const remoteUrls = possibleKeys
+          .filter(k => k.startsWith('http://') || k.startsWith('https://'));
+        
+        for (const key of possibleKeys) {
+          const resolved = hymnalApi.resolveImagePath(key);
+          if (resolved && (resolved.startsWith('http://') || resolved.startsWith('https://')) && !remoteUrls.includes(resolved)) {
+            remoteUrls.push(resolved);
+          }
+        }
+
+        for (const rUrl of remoteUrls) {
+          try {
+            const res = await fetch(rUrl);
+            if (res.ok) {
+              const blob = await res.blob();
+              if (active && blob.size > 0) {
+                const url = URL.createObjectURL(blob);
+                currentBlobUrl = url;
+                setBlobUrl(url);
+                if (possibleKeys[0]) {
+                  imageCache.saveImage(possibleKeys[0], blob).catch(() => {});
+                }
+                return;
+              }
+            }
+          } catch (_) {}
+        }
+
+        // 3단계: 구글 드라이브 ID 다운로드 (20자 이상의 구글 드라이브 파일 ID)
+        const gdriveKeys = possibleKeys.filter(k => 
+          k.length >= 20 && !k.startsWith('http') && !k.startsWith('/') && !k.includes(' ')
+        );
+        for (const gKey of gdriveKeys) {
+          try {
+            const { gdriveWebService } = await import('../../api/gdriveWebService');
+            const gUrl = await gdriveWebService.downloadImageBlob(gKey);
+            if (active && gUrl) {
+              currentBlobUrl = gUrl;
+              setBlobUrl(gUrl);
+              return;
+            }
+          } catch (_) {}
+        }
+
+        // 4단계: hymnalApi 정적 경로 fallback
+        for (const key of possibleKeys) {
+          const fallback = hymnalApi.resolveImagePath(key);
+          if (fallback && active) {
+            setBlobUrl(fallback);
+            return;
+          }
+        }
+      } catch (err) {
+        console.error('[ContiEditor] Image load error:', err);
+      }
     };
-  }, [song?.fileId, song?.filePath, song?.filename]);
+
+    loadImage();
+
+    return () => {
+      active = false;
+      if (currentBlobUrl && currentBlobUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(currentBlobUrl);
+      }
+    };
+  }, [song?.id, song?.fileId, song?.filePath, song?.filename, song?.storageUrl, item?.songId]);
 
   const crop = item.crop || { top: 0, bottom: 0, left: 0, right: 0 };
   const visibleWidthFactor = (100 - crop.left - crop.right) / 100;
   const visibleHeightFactor = (100 - crop.top - crop.bottom) / 100;
 
+  // 자르기 모드일 때는 원본 크기로 조작하고, 완료 시에는 잘린 크기로 표시
+  const currentWidthPercent = isCropping ? item.width : (item.width * visibleWidthFactor);
+  const currentAspectRatio = isCropping 
+    ? imageRatio 
+    : (imageRatio * (visibleWidthFactor / visibleHeightFactor));
+
+  // 인라인 테두리 자르기 핸들 드래그 핸들러 (마우스 이동과 1:1로 선이 안쪽으로 이동)
+  const handleStartCropHandle = (direction: 'top' | 'bottom' | 'left' | 'right', e: React.PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const handleEl = e.currentTarget as HTMLElement;
+    handleEl.setPointerCapture(e.pointerId);
+
+    const container = cropBoxRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const initialCrop = { ...(item.crop || { top: 0, bottom: 0, left: 0, right: 0 }) };
+
+    const onPointerMove = (me: PointerEvent) => {
+      me.stopPropagation();
+      me.preventDefault();
+
+      const newCrop = { ...initialCrop };
+      if (direction === 'top') {
+        const dy = me.clientY - startY;
+        const deltaPercent = (dy / rect.height) * 100;
+        newCrop.top = Math.max(0, Math.min(50, Math.round(initialCrop.top + deltaPercent)));
+      } else if (direction === 'bottom') {
+        const dy = startY - me.clientY;
+        const deltaPercent = (dy / rect.height) * 100;
+        newCrop.bottom = Math.max(0, Math.min(50, Math.round(initialCrop.bottom + deltaPercent)));
+      } else if (direction === 'left') {
+        const dx = me.clientX - startX;
+        const deltaPercent = (dx / rect.width) * 100;
+        newCrop.left = Math.max(0, Math.min(50, Math.round(initialCrop.left + deltaPercent)));
+      } else if (direction === 'right') {
+        const dx = startX - me.clientX;
+        const deltaPercent = (dx / rect.width) * 100;
+        newCrop.right = Math.max(0, Math.min(50, Math.round(initialCrop.right + deltaPercent)));
+      }
+
+      onUpdate(item.id, { crop: newCrop });
+    };
+
+    const onPointerUp = (ue: PointerEvent) => {
+      try {
+        handleEl.releasePointerCapture(ue.pointerId);
+      } catch (_) {}
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+    };
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+  };
+
   return (
     <motion.div
-      drag={!isPreviewMode} dragMomentum={false} dragElastic={0} dragConstraints={canvasRef}
+      drag={!isPreviewMode && !isResizing && !isCropping} 
+      dragMomentum={false} 
+      dragElastic={0} 
+      dragConstraints={canvasRef}
       initial={false}
       onDragStart={() => onSelect(item.id)}
       onDragEnd={(e) => {
+         if (isResizing || isCropping) return;
          const canvas = canvasRef.current; if (!canvas) return;
          const rect = canvas.getBoundingClientRect();
          const el = (e.target as HTMLElement).closest('.conti-item-container');
@@ -146,96 +297,262 @@ const DraggableContiItem = React.memo(({
       transition={{ type: "tween", ease: "linear", duration: 0 }}
       style={{
         left: 0, top: 0,
-        width: `${item.width}%`,
+        width: `${currentWidthPercent}%`,
+        transformOrigin: '0 0',
       }}
       onClick={(e) => { e.stopPropagation(); onSelect(item.id); }}
     >
+       {/* 악보 기능바: 악보와 겹치지 않게 -top-12에 여유 있게 배치 */}
        {isSelected && !isPreviewMode && (
          <div 
-           className="absolute -top-9 left-0 flex items-center gap-1.5 bg-[#FAF9F5] text-[#2B2927] px-2 py-1 rounded-xl shadow-md z-[110] no-print border border-[#E5E0D8] animate-in fade-in slide-in-from-bottom-1 duration-200"
+           className="absolute -top-12 left-0 flex items-center gap-1.5 bg-[#FAF9F5] text-[#2B2927] px-2 py-1 rounded-xl shadow-md z-[120] no-print border border-[#E5E0D8] animate-in fade-in slide-in-from-bottom-1 duration-200"
            onMouseDown={(e) => e.stopPropagation()}
            onClick={(e) => e.stopPropagation()}
          >
-            {/* 자르기 - 데스크톱 전용 */}
-            <button onClick={() => onCropEdit(item.id)} className="hidden md:flex items-center gap-1.5 px-2.5 py-1 bg-[#D97757] hover:bg-[#C96442] text-white transition-all rounded-lg shadow-2xs group whitespace-nowrap cursor-pointer">
-              <Scissors className="w-3 h-3 text-white/90 group-hover:scale-110 transition-transform" />
-              <span className="text-[11px] font-medium tracking-tight">자르기</span>
-            </button>
-            
-            <div className="hidden md:block w-px h-3.5 bg-[#E5E0D8] mx-0.5" />
-            
-            {/* 메모 - 데스크톱 전용 */}
-            <div className="hidden md:flex items-center gap-2">
-              <button 
-                onClick={() => onUpdate(item.id, { isMemoOpen: !item.isMemoOpen })} 
-                className={`flex items-center gap-1.5 px-2.5 py-1 transition-all rounded-lg text-xs font-medium cursor-pointer ${item.isMemoOpen ? 'bg-[#FAF0EB] text-[#D97757] border border-[#F1D3C6]' : 'text-[#6A6864] hover:bg-[#F3EFE9]'}`}
-              >
-                <StickyNote className="w-3 h-3" />
-                <span className="text-[11px] font-medium tracking-tight">메모</span>
-              </button>
+            {/* 메모 열림 상태일 때: 공간 절약을 위해 자르기/삭제 버튼 숨기고 메모 전용 도구만 표시 */}
+            {item.isMemoOpen ? (
+              <div className="flex items-center gap-1.5">
+                <button 
+                  onClick={() => onUpdate(item.id, { isMemoOpen: false })} 
+                  className="flex items-center gap-1 px-2 py-1 bg-[#FAF0EB] text-[#D97757] border border-[#F1D3C6] rounded-lg text-xs font-semibold cursor-pointer"
+                  title="메모 닫기"
+                >
+                  <StickyNote className="w-3 h-3" />
+                  <span className="text-[11px] tracking-tight">메모</span>
+                </button>
 
-              {item.isMemoOpen && (
+                <div className="w-px h-3.5 bg-[#E5E0D8]" />
+
+                {/* 메모 위치: 상단 / 하단 */}
+                <div className="flex bg-[#F3EFE9] p-0.5 rounded-lg border border-[#E5E0D8]">
+                  <button 
+                    onClick={() => onUpdate(item.id, { memoPosition: 'top' })} 
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer ${item.memoPosition === 'top' ? 'bg-[#D97757] text-white shadow-2xs' : 'text-[#6A6864] hover:text-[#2B2927]'}`}
+                  >
+                    상단
+                  </button>
+                  <button 
+                    onClick={() => onUpdate(item.id, { memoPosition: 'bottom' })} 
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer ${(!item.memoPosition || item.memoPosition === 'bottom') ? 'bg-[#D97757] text-white shadow-2xs' : 'text-[#6A6864] hover:text-[#2B2927]'}`}
+                  >
+                    하단
+                  </button>
+                </div>
+
+                <div className="w-px h-3.5 bg-[#E5E0D8]" />
+
+                {/* 글자크기: 15~30 가로바 (길이 반으로 축소) */}
                 <SmoothSlider 
                   label="크기" 
-                  min={10} max={60} 
-                  value={item.memoFontSize || 12} 
+                  min={15} max={30} 
+                  value={item.memoFontSize || 16} 
                   onChange={(v) => onUpdate(item.id, { memoFontSize: v })}
                   accentColor="accent-[#D97757]"
+                  widthClass="w-8 sm:w-10"
                 />
-              )}
-            </div>
+              </div>
+            ) : (
+              /* 평소 상태: [자르기] | [메모] | [삭제] 3가지 심플 구성 */
+              <div className="flex items-center gap-1.5">
+                {/* 1. 자르기 기능 */}
+                {isCropping ? (
+                  <div className="flex items-center gap-1">
+                    <button 
+                      onClick={() => onCropEdit(null)} 
+                      className="flex items-center gap-1.5 px-2.5 py-1 bg-[#2E7D32] hover:bg-[#256628] text-white transition-all rounded-lg shadow-2xs font-semibold whitespace-nowrap cursor-pointer"
+                      title="자르기 완료"
+                    >
+                      <Check className="w-3 h-3 text-white stroke-[2.5px]" />
+                      <span className="text-[11px] font-bold tracking-tight">자르기 완료</span>
+                    </button>
+                    <button 
+                      onClick={() => onUpdate(item.id, { crop: { top: 0, bottom: 0, left: 0, right: 0 } })} 
+                      className="flex items-center gap-1 px-2 py-1 bg-white hover:bg-[#F3EFE9] text-[#6A6864] transition-all rounded-lg border border-[#E5E0D8] text-[10px] font-medium cursor-pointer"
+                      title="자르기 초기화"
+                    >
+                      <RotateCcw className="w-2.5 h-2.5" />
+                      <span>초기화</span>
+                    </button>
+                  </div>
+                ) : (
+                  <button 
+                    onClick={() => onCropEdit(item.id)} 
+                    className="flex items-center gap-1.5 px-2.5 py-1 bg-[#D97757] hover:bg-[#C96442] text-white transition-all rounded-lg shadow-2xs group whitespace-nowrap cursor-pointer"
+                    title="상하좌우 선을 드래그하여 여백 자르기"
+                  >
+                    <Scissors className="w-3 h-3 text-white/90 group-hover:scale-110 transition-transform" />
+                    <span className="text-[11px] font-medium tracking-tight">자르기</span>
+                  </button>
+                )}
+                
+                <div className="w-px h-3.5 bg-[#E5E0D8] mx-0.5" />
+                
+                {/* 2. 메모 버튼 */}
+                <button 
+                  onClick={() => onUpdate(item.id, { isMemoOpen: true })} 
+                  className="flex items-center gap-1.5 px-2.5 py-1 text-[#6A6864] hover:bg-[#F3EFE9] transition-all rounded-lg text-xs font-medium cursor-pointer"
+                >
+                  <StickyNote className="w-3 h-3" />
+                  <span className="text-[11px] font-medium tracking-tight">메모</span>
+                </button>
 
-            <div className="hidden md:block w-px h-3.5 bg-[#E5E0D8] mx-0.5" />
-            
-            {/* 크기 조절기 - 모바일/데스크톱 공통 */}
-            <div className="flex items-center gap-1">
-                <span className="text-[9px] font-medium text-[#8C877D] hidden sm:inline">크기</span>
-                <div className="flex items-center gap-0.5 bg-[#F3EFE9] p-0.5 rounded-lg border border-[#E5E0D8]">
-                   <button onMouseDown={(e) => e.stopPropagation()} onClick={() => onUpdate(item.id, { width: Math.round(Math.max(10, item.width - 2)) })} className="p-1 hover:bg-[#EBE5DC] rounded text-[#6A6864] hover:text-[#2B2927] transition-all cursor-pointer">
-                     <Minus className="w-3 h-3" />
-                   </button>
-                   <span className="text-[10px] font-semibold font-mono text-[#D97757] w-7 text-center">{Math.round(item.width)}%</span>
-                   <button onMouseDown={(e) => e.stopPropagation()} onClick={() => onUpdate(item.id, { width: Math.round(Math.min(100, item.width + 2)) })} className="p-1 hover:bg-[#EBE5DC] rounded text-[#6A6864] hover:text-[#2B2927] transition-all cursor-pointer">
-                     <Plus className="w-3 h-3" />
-                   </button>
-                </div>
-            </div>
-            
-            <div className="hidden md:block w-px h-3.5 bg-[#E5E0D8] mx-0.5" />
-            
-            {/* 삭제 - 데스크톱 전용 */}
-            <button onClick={() => onRemove(item.id)} className="hidden md:flex p-1 text-[#8C877D] hover:text-[#D97757] hover:bg-[#FAF0EB] rounded-lg transition-all cursor-pointer" title="악보 삭제">
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
+                <div className="w-px h-3.5 bg-[#E5E0D8] mx-0.5" />
+                
+                {/* 3. 삭제 버튼 */}
+                <button onClick={() => onRemove(item.id)} className="flex p-1 text-[#8C877D] hover:text-[#D97757] hover:bg-[#FAF0EB] rounded-lg transition-all cursor-pointer" title="악보 삭제">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
          </div>
        )}
 
-       <div className="relative w-full overflow-hidden rounded-sm ring-1 ring-[#E5E0D8] bg-white" style={{ aspectRatio: `${imageRatio * (visibleWidthFactor / visibleHeightFactor)}` }}>
+       {/* 상단 메모창 (memoPosition === 'top') */}
+       {item.isMemoOpen && item.memoPosition === 'top' && (
+          <div className="mb-2 no-print relative group/memo" onMouseDown={(e) => e.stopPropagation()}>
+            <textarea 
+              value={localMemo} 
+              onChange={(e) => setLocalMemo(e.target.value)} 
+              onBlur={() => onUpdate(item.id, { memo: localMemo })}
+              placeholder="찬양 멘트..." 
+              className="w-full bg-white border border-[#E5E0D8] rounded-xl p-2.5 font-medium text-[#2B2927] shadow-xs focus:border-[#D97757] focus:ring-2 focus:ring-[#D97757]/10 focus:outline-none transition-all resize-none custom-scrollbar" 
+              style={{ fontSize: `${item.memoFontSize || 16}px`, height: 'auto', minHeight: '44px' }} 
+            />
+          </div>
+       )}
+       {item.memo && item.memoPosition === 'top' && (
+         <div className="hidden print:block text-center mb-2 font-black text-black leading-tight" style={{ fontSize: `${item.memoFontSize || 16}px` }}>{item.memo}</div>
+       )}
+
+       {/* 악보 이미지 박스 */}
+       <div 
+         ref={cropBoxRef} 
+         className="relative w-full overflow-hidden rounded-sm ring-1 ring-[#E5E0D8] bg-white select-none" 
+         style={{ aspectRatio: `${currentAspectRatio}` }}
+       >
           <img 
             src={blobUrl || hymnalApi.resolveImagePath(song?.filePath || song?.filename || '')} 
             className="absolute block max-w-none" 
-            onLoad={(e) => { setImageRatio(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight); }} 
-            style={{ width: `${100 / visibleWidthFactor}%`, left: `-${(crop.left / visibleWidthFactor)}%`, top: `-${(crop.top / visibleHeightFactor)}%` }} 
+            onLoad={(e) => { 
+              if (e.currentTarget.naturalWidth && e.currentTarget.naturalHeight) {
+                setImageRatio(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight); 
+              }
+            }} 
+            style={isCropping ? {
+              width: '100%',
+              left: 0,
+              top: 0
+            } : { 
+              width: `${(1 / visibleWidthFactor) * 100}%`, 
+              left: `-${(crop.left / visibleWidthFactor)}%`, 
+              top: `-${(crop.top / visibleHeightFactor)}%` 
+            }} 
             draggable={false} 
           />
+
+          {/* 인라인 자르기 모드: 4개 선이 마우스 드래그를 따라 안쪽으로 스르륵 움직이며 여백을 자름 */}
+          {isCropping && !isPreviewMode && (
+            <div className="absolute inset-0 z-40 pointer-events-auto select-none">
+              {/* 잘려나가는 영역 어두운 마스크 */}
+              <div className="absolute top-0 left-0 right-0 bg-black/40 pointer-events-none" style={{ height: `${crop.top}%` }} />
+              <div className="absolute bottom-0 left-0 right-0 bg-black/40 pointer-events-none" style={{ height: `${crop.bottom}%` }} />
+              <div className="absolute left-0 bg-black/40 pointer-events-none" style={{ top: `${crop.top}%`, bottom: `${crop.bottom}%`, width: `${crop.left}%` }} />
+              <div className="absolute right-0 bg-black/40 pointer-events-none" style={{ top: `${crop.top}%`, bottom: `${crop.bottom}%`, width: `${crop.right}%` }} />
+
+              {/* 자르는 사각형 테두리 가이드라인 (바깥 주황색 선과 일체화) */}
+              <div 
+                className="absolute border-2 border-[#D97757] pointer-events-none shadow-xs"
+                style={{
+                  top: `${crop.top}%`,
+                  bottom: `${crop.bottom}%`,
+                  left: `${crop.left}%`,
+                  right: `${crop.right}%`
+                }}
+              />
+
+              {/* 상단 핸들 바 (도톰한 6px 두께로 바깥 선과 밀착 일체화, 마우스로 잡고 내리면 줄이 아래로 이동) */}
+              <div 
+                className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 w-[35%] py-2.5 flex items-center justify-center cursor-ns-resize group/top z-50 touch-none"
+                style={{ top: `${crop.top}%` }}
+                onPointerDown={(e) => handleStartCropHandle('top', e)}
+                title="아래로 드래그하여 위쪽 여백 자르기"
+              >
+                <div className="w-full h-[6px] bg-[#D97757] rounded-full shadow-md group-hover/top:h-[7px] group-hover/top:bg-[#C96442] transition-all" />
+              </div>
+
+              {/* 하단 핸들 바 (도톰한 6px 두께로 바깥 선과 밀착 일체화, 마우스로 잡고 올리면 줄이 위로 이동) */}
+              <div 
+                className="absolute left-1/2 -translate-x-1/2 translate-y-1/2 w-[35%] py-2.5 flex items-center justify-center cursor-ns-resize group/bot z-50 touch-none"
+                style={{ bottom: `${crop.bottom}%` }}
+                onPointerDown={(e) => handleStartCropHandle('bottom', e)}
+                title="위로 드래그하여 아래쪽 여백 자르기"
+              >
+                <div className="w-full h-[6px] bg-[#D97757] rounded-full shadow-md group-hover/bot:h-[7px] group-hover/bot:bg-[#C96442] transition-all" />
+              </div>
+
+              {/* 좌측 핸들 바 (도톰한 6px 두께로 바깥 선과 밀착 일체화, 마우스로 잡고 밀면 줄이 오른쪽으로 이동) */}
+              <div 
+                className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 h-[35%] px-2.5 flex items-center justify-center cursor-ew-resize group/left z-50 touch-none"
+                style={{ left: `${crop.left}%` }}
+                onPointerDown={(e) => handleStartCropHandle('left', e)}
+                title="우측으로 드래그하여 왼쪽 여백 자르기"
+              >
+                <div className="h-full w-[6px] bg-[#D97757] rounded-full shadow-md group-hover/left:w-[7px] group-hover/left:bg-[#C96442] transition-all" />
+              </div>
+
+              {/* 우측 핸들 바 (도톰한 6px 두께로 바깥 선과 밀착 일체화, 마우스로 잡고 밀면 줄이 왼쪽으로 이동) */}
+              <div 
+                className="absolute top-1/2 translate-x-1/2 -translate-y-1/2 h-[35%] px-2.5 flex items-center justify-center cursor-ew-resize group/right z-50 touch-none"
+                style={{ right: `${crop.right}%` }}
+                onPointerDown={(e) => handleStartCropHandle('right', e)}
+                title="좌측으로 드래그하여 오른쪽 여백 자르기"
+              >
+                <div className="h-full w-[6px] bg-[#D97757] rounded-full shadow-md group-hover/right:w-[7px] group-hover/right:bg-[#C96442] transition-all" />
+              </div>
+            </div>
+          )}
        </div>
 
-       {/* 모바일/PC 공통 우하단 리사이즈 드래그 핸들 */}
-       {isSelected && !isPreviewMode && (
+       {/* 하단 메모창 (기본값: memoPosition !== 'top') */}
+       {item.isMemoOpen && (!item.memoPosition || item.memoPosition === 'bottom') && (
+          <div className="mt-2.5 no-print relative group/memo" onMouseDown={(e) => e.stopPropagation()}>
+            <textarea 
+              value={localMemo} 
+              onChange={(e) => setLocalMemo(e.target.value)} 
+              onBlur={() => onUpdate(item.id, { memo: localMemo })}
+              placeholder="찬양 멘트..." 
+              className="w-full bg-white border border-[#E5E0D8] rounded-xl p-2.5 font-medium text-[#2B2927] shadow-xs focus:border-[#D97757] focus:ring-2 focus:ring-[#D97757]/10 focus:outline-none transition-all resize-none custom-scrollbar" 
+              style={{ fontSize: `${item.memoFontSize || 16}px`, height: 'auto', minHeight: '44px' }} 
+            />
+          </div>
+       )}
+       {item.memo && (!item.memoPosition || item.memoPosition === 'bottom') && (
+         <div className="hidden print:block text-center mt-2.5 font-black text-black leading-tight" style={{ fontSize: `${item.memoFontSize || 16}px` }}>{item.memo}</div>
+       )}
+
+       {/* 우하단 리사이즈 드래그 핸들 (기준점 좌상단 완전 고정) */}
+       {isSelected && !isPreviewMode && !isCropping && (
          <div 
-           className="absolute -bottom-2 -right-2 w-5 h-5 bg-[#D97757] border-2 border-white rounded-full shadow-md flex items-center justify-center cursor-se-resize touch-none z-[102]"
+           className="absolute -bottom-2 -right-2 w-5 h-5 bg-[#D97757] border-2 border-white rounded-full shadow-md flex items-center justify-center cursor-se-resize touch-none z-[102] hover:scale-110 active:scale-95 transition-transform"
            onPointerDown={(e) => {
              e.stopPropagation();
-             e.currentTarget.setPointerCapture(e.pointerId);
+             e.preventDefault();
+             setIsResizing(true);
+             const targetEl = e.currentTarget as HTMLElement;
+             targetEl.setPointerCapture(e.pointerId);
              const startX = e.clientX;
              const startWidth = item.width;
              const move = (me: PointerEvent) => {
+               me.stopPropagation();
+               me.preventDefault();
                const dx = me.clientX - startX;
                const dPercent = (dx / canvasWidth) * 100;
                const newWidth = Math.round(Math.max(10, Math.min(100, startWidth + dPercent)));
                onUpdate(item.id, { width: newWidth });
              };
-             const up = () => {
+             const up = (ue: PointerEvent) => {
+               try { targetEl.releasePointerCapture(ue.pointerId); } catch (_) {}
+               setIsResizing(false);
                window.removeEventListener('pointermove', move);
                window.removeEventListener('pointerup', up);
              };
@@ -244,7 +561,7 @@ const DraggableContiItem = React.memo(({
            }}
            title="드래그하여 크기 조절"
          >
-           <div className="w-1.5 h-1.5 bg-white rounded-full" />
+           <div className="w-1.5 h-1.5 bg-white rounded-full pointer-events-none" />
          </div>
        )}
 
@@ -255,176 +572,10 @@ const DraggableContiItem = React.memo(({
        )}
 
        {isSelected && !isPreviewMode && <div className="absolute -inset-1 border-2 border-[#D97757] rounded-lg pointer-events-none z-[101]" />}
-       
-       {item.isMemoOpen && (
-          <div className="mt-2.5 no-print relative group/memo" onMouseDown={(e) => e.stopPropagation()}>
-            <textarea 
-              value={localMemo} 
-              onChange={(e) => setLocalMemo(e.target.value)} 
-              onBlur={() => onUpdate(item.id, { memo: localMemo })}
-              placeholder="찬양 멘트..." 
-              className="w-full bg-white border border-[#E5E0D8] rounded-xl p-2.5 font-medium text-[#2B2927] shadow-xs focus:border-[#D97757] focus:ring-2 focus:ring-[#D97757]/10 focus:outline-none transition-all resize-none custom-scrollbar" 
-              style={{ fontSize: `${item.memoFontSize || 12}px`, height: 'auto', minHeight: '50px' }} 
-            />
-          </div>
-       )}
-       <div className="hidden print:block text-center mt-2.5 font-black text-black leading-tight" style={{ fontSize: `${item.memoFontSize || 12}px` }}>{item.memo}</div>
+
     </motion.div>
   );
 });
-
-// --- Pro Crop Overlay Component ---
-const CropEditor: React.FC<{
-  item: ContiItem;
-  song: any;
-  onSave: (crop: NonNullable<ContiItem['crop']>, width: number) => void;
-  onCancel: () => void;
-}> = ({ item, song, onSave, onCancel }) => {
-  const [crop, setCrop] = useState(item.crop || { top: 0, bottom: 0, left: 0, right: 0 });
-  const [zoom, setZoom] = useState(item.width);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    let isMounted = true;
-    const fileId = song?.fileId || song?.filePath || song?.filename;
-    
-    // HTTP URL, Data URL, Blob URL 또는 로컬 경로인 경우 즉시 직접 사용
-    if (fileId && (fileId.startsWith('http') || fileId.startsWith('data:') || fileId.startsWith('blob:') || fileId.startsWith('/'))) {
-      setBlobUrl(fileId);
-      return;
-    }
-
-    if (fileId && fileId.length > 20) {
-      import('../../api/gdriveWebService').then(({ gdriveWebService }) => {
-        gdriveWebService.downloadImageBlob(fileId).then(url => {
-          if (isMounted && url) {
-            setBlobUrl(url);
-          }
-        });
-      });
-    }
-    
-    return () => {
-      isMounted = false;
-    };
-  }, [song?.fileId, song?.filePath, song?.filename]);
-
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY * -0.05;
-    setZoom(prev => Math.max(1, Math.min(100, prev + delta)));
-  };
-
-  const handleReset = () => {
-    setCrop({ top: 0, bottom: 0, left: 0, right: 0 });
-    setZoom(25);
-  };
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[10000] bg-[#1E1D1B]/85 backdrop-blur-md flex flex-col items-center justify-center no-print"
-      onWheel={handleWheel}
-    >
-        <div className="absolute top-8 left-1/2 -translate-x-1/2 text-center">
-            <h3 className="font-serif text-[#FAF9F5] text-lg font-bold tracking-tight">{song?.title} - 자르기 편집</h3>
-            <p className="text-[#A8A49C] text-xs font-medium mt-1">상자 모서리를 잡아당겨 자르기 • 마우스 휠로 확대</p>
-        </div>
-
-        <div ref={containerRef} className="relative w-[80vw] h-[70vh] flex items-center justify-center overflow-hidden">
-            <div className="relative transition-transform duration-200 ease-out" style={{ width: `${zoom}%` }}>
-               {(!blobUrl && (song?.fileId || song?.filePath)?.length > 20 && !(song?.fileId || song?.filePath)?.startsWith('/')) ? (
-                 <div className="w-full h-64 flex flex-col items-center justify-center bg-white/5 rounded-2xl border border-white/10 text-[#FAF9F5]">
-                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#D97757] mb-2"></div>
-                   <span className="text-xs font-medium opacity-80">구글 드라이브 원본을 불러오는 중...</span>
-                 </div>
-               ) : (
-                 <img src={blobUrl || hymnalApi.resolveImagePath(song?.filePath || song?.filename || '')} className="w-full h-auto block select-none pointer-events-none rounded-sm shadow-2xl" alt="preview" />
-               )}
-               
-               {/* Dimmed Area */}
-               <div className="absolute inset-0 pointer-events-none">
-                  <div className="absolute top-0 left-0 right-0 bg-black/60" style={{ height: `${crop.top}%` }} />
-                  <div className="absolute bottom-0 left-0 right-0 bg-black/60" style={{ height: `${crop.bottom}%` }} />
-                  <div className="absolute top-[var(--top)] bottom-[var(--bottom)] left-0 bg-black/60" 
-                    style={{ '--top': `${crop.top}%`, '--bottom': `${crop.bottom}%`, width: `${crop.left}%` } as any} />
-                  <div className="absolute top-[var(--top)] bottom-[var(--bottom)] right-0 bg-black/60" 
-                    style={{ '--top': `${crop.top}%`, '--bottom': `${crop.bottom}%`, width: `${crop.right}%` } as any} />
-               </div>
-
-               {/* Resizable Crop Box */}
-               <div className="absolute border-2 border-[#D97757] shadow-2xl cursor-move touch-none" style={{ top: `${crop.top}%`, left: `${crop.left}%`, right: `${crop.right}%`, bottom: `${crop.bottom}%` }}
-                 onPointerDown={(e) => {
-                    e.currentTarget.setPointerCapture(e.pointerId);
-                    const rect = (e.currentTarget as HTMLElement).parentElement!.getBoundingClientRect();
-                    const startX = e.clientX; const startY = e.clientY; const startCrop = { ...crop };
-                    const move = (me: PointerEvent) => {
-                       const dx = ((me.clientX - startX) / rect.width) * 100;
-                       const dy = ((me.clientY - startY) / rect.height) * 100;
-                       const nLeft = Math.max(0, Math.min(100 - (100-startCrop.right-startCrop.left), startCrop.left + dx));
-                       const nTop = Math.max(0, Math.min(100 - (100-startCrop.bottom-startCrop.top), startCrop.top + dy));
-                       setCrop({ top: nTop, bottom: startCrop.bottom - (nTop-startCrop.top), left: nLeft, right: startCrop.right - (nLeft-startCrop.left) });
-                    };
-                    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
-                    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
-                 }}
-               >
-                  {/* Handles */}
-                  {[
-                    { style: 'top-[-6px] left-[-6px] cursor-nw-resize', type: 'tl' },
-                    { style: 'top-[-6px] right-[-6px] cursor-ne-resize', type: 'tr' },
-                    { style: 'bottom-[-6px] left-[-6px] cursor-sw-resize', type: 'bl' },
-                    { style: 'bottom-[-6px] right-[-6px] cursor-se-resize', type: 'br' },
-                    { style: 'top-[-6px] left-1/2 -translate-x-1/2 cursor-n-resize h-3 w-10 bg-[#D97757]', type: 'n' },
-                    { style: 'bottom-[-6px] left-1/2 -translate-x-1/2 cursor-s-resize h-3 w-10 bg-[#D97757]', type: 's' },
-                  ].map(h => (
-                    <div key={h.type} className={`absolute z-[10] border-2 border-white bg-[#D97757] rounded-full shadow-md ${h.style} ${!h.style.includes('h-') ? 'w-5 h-5' : 'h-3.5 w-10'} touch-none`}
-                      onPointerDown={(e) => {
-                        e.stopPropagation();
-                        e.currentTarget.setPointerCapture(e.pointerId);
-                        const rect = (e.currentTarget as HTMLElement).parentElement!.parentElement!.getBoundingClientRect();
-                        const sX = e.clientX; const sY = e.clientY; const sC = { ...crop };
-                        const move = (me: PointerEvent) => {
-                          const dx = ((me.clientX - sX) / rect.width) * 100;
-                          const dy = ((me.clientY - sY) / rect.height) * 100;
-                          setCrop(prev => {
-                            const n = { ...prev };
-                            if (h.type.includes('n')) n.top = Math.max(0, Math.min(100 - prev.bottom - 2, sC.top + dy));
-                            if (h.type.includes('s')) n.bottom = Math.max(0, Math.min(100 - prev.top - 2, sC.bottom - dy));
-                            if (h.type.includes('l')) n.left = Math.max(0, Math.min(100 - prev.right - 2, sC.left + dx));
-                            if (h.type.includes('r')) n.right = Math.max(0, Math.min(100 - prev.left - 2, sC.right - dx));
-                            return n;
-                          });
-                        };
-                        const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
-                        window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
-                      }}
-                    />
-                  ))}
-               </div>
-            </div>
-        </div>
-
-        <div className="absolute bottom-10 flex items-center gap-6 bg-[#FAF9F5] px-7 py-3 rounded-2xl border border-[#E5E0D8] shadow-2xl">
-           <button onClick={handleReset} className="text-[#6A6864] text-xs font-semibold hover:text-[#2B2927] transition-colors cursor-pointer">초기화</button>
-           <div className="w-px h-4 bg-[#E5E0D8]" />
-           <div className="flex items-center gap-3">
-              <Search className="w-4 h-4 text-[#D97757]" />
-              <input type="range" min="1" max="100" step="0.1" value={zoom} onChange={(e) => setZoom(Number(e.target.value))} className="w-40 accent-[#D97757] cursor-pointer" />
-              <span className="text-[#2B2927] font-mono text-xs font-semibold">{zoom.toFixed(1)}%</span>
-           </div>
-           <div className="w-px h-4 bg-[#E5E0D8]" />
-           <div className="flex items-center gap-2">
-              <button onClick={onCancel} className="px-4 py-1.5 rounded-xl text-xs font-medium text-[#6A6864] hover:text-[#2B2927] hover:bg-[#F3EFE9] transition-colors cursor-pointer">취소</button>
-              <button onClick={() => onSave(crop, zoom)} className="px-5 py-1.5 rounded-xl text-xs font-semibold bg-[#D97757] hover:bg-[#C96442] text-white shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer">
-                <Check className="w-3.5 h-3.5" /> 적용하기
-              </button>
-           </div>
-        </div>
-    </motion.div>
-  );
-};
 
 // --- Sub-component for individual page content ---
 const PageContent: React.FC<{ 
@@ -432,10 +583,11 @@ const PageContent: React.FC<{
   canvasWidth: number, 
   canvasHeight: number,
   activeItemId: string | null,
+  cropEditingId: string | null,
   setActiveItemId: (id: string | null) => void,
   setCropEditingId: (id: string | null) => void,
   isPreviewMode: boolean
-}> = ({ pNum, canvasWidth, canvasHeight, activeItemId, setActiveItemId, setCropEditingId, isPreviewMode }) => {
+}> = ({ pNum, canvasWidth, canvasHeight, activeItemId, cropEditingId, setActiveItemId, setCropEditingId, isPreviewMode }) => {
   const { 
     contiItems, contiTitle, contiTitleFontSize, songs, 
     updateContiItem, removeFromConti, showContiNumbers
@@ -472,6 +624,7 @@ const PageContent: React.FC<{
               return sId === tId || (s.fileId && s.fileId.toString() === tId) || tId.endsWith('-' + sId) || sId.endsWith('-' + tId);
             })}
             isSelected={activeItemId === item.id}
+            cropEditingId={cropEditingId}
             canvasWidth={canvasWidth}
             canvasHeight={canvasHeight}
             isPreviewMode={isPreviewMode}
@@ -481,7 +634,7 @@ const PageContent: React.FC<{
             onSelect={setActiveItemId}
             onUpdate={updateContiItem}
             onRemove={removeFromConti}
-            onCropEdit={setCropEditingId}
+            onCropEdit={(id: string | null) => setCropEditingId(id)}
           />
         ))}
       </AnimatePresence>
@@ -511,20 +664,10 @@ export const ContiEditor: React.FC = () => {
   const isLandscape = orientation === 'landscape';
   const canvasWidth = isLandscape ? (paperSize === 'A4' ? 1123 : 1587) : (paperSize === 'A4' ? 794 : 1123);
   const canvasHeight = isLandscape ? (paperSize === 'A4' ? 794 : 1123) : (paperSize === 'A4' ? 1123 : 1587);
-  const editingItem = contiItems.find(i => i.id === cropEditingId);
-  const editingSong = editingItem ? songs.find(s => {
-    if (!s || !s.id || !editingItem.songId) return false;
-    const sId = s.id.toString();
-    const tId = editingItem.songId.toString();
-    return sId === tId || (s.fileId && s.fileId.toString() === tId) || tId.endsWith('-' + sId) || sId.endsWith('-' + tId);
-  }) : null;
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[9999] flex flex-col overflow-hidden select-none bg-[#F5F3ED]">
         <AnimatePresence>
-          {cropEditingId && editingItem && editingSong && (
-            <CropEditor key="crop-editor" item={editingItem} song={editingSong} onCancel={() => setCropEditingId(null)} onSave={(newCrop, newWidth) => { updateContiItem(cropEditingId, { crop: newCrop, width: newWidth }); setCropEditingId(null); }} />
-          )}
           <SavedContisModal 
             key="saved-contis-modal"
             isOpen={isLibraryOpen} 
@@ -738,7 +881,7 @@ export const ContiEditor: React.FC = () => {
         {/* 3층: 곡 순서 Reorder 바 */}
         <div className={`bg-[#FAF9F5] border-b border-[#E5E0D8] flex items-center gap-2 overflow-x-auto custom-scrollbar no-print transition-all duration-300 ${isPreviewMode ? 'opacity-0 h-0 p-0 pointer-events-none' : 'opacity-100 h-auto'}`}>
           <div className="flex items-center px-3 py-2 border-r border-[#E5E0D8] shrink-0">
-             <TooltipIcon text="좌측 [악보이름]을 선택하면 아래 페이지에 악보가 보입니다. [악보이름]을 좌우로 이동하여 악보번호를 바꿉니다." />
+             <TooltipIcon text="[우측] 악보이름을 선택하면 아래 페이지에 악보가 보입니다. [악보이름]을 좌우로 이동하여 악보번호를 바꿉니다." />
           </div>
           <Reorder.Group axis="x" values={contiItems} onReorder={reorderContiItems} className="px-2 pt-2 pb-2.5 flex items-center gap-1.5 flex-1">
            {contiItems.filter(item => !item.isVisible || item.page === 1).map((item, idx) => {
@@ -771,6 +914,7 @@ export const ContiEditor: React.FC = () => {
                    canvasWidth={canvasWidth} 
                    canvasHeight={canvasHeight} 
                    activeItemId={activeItemId} 
+                   cropEditingId={cropEditingId}
                    setActiveItemId={setActiveItemId}
                    setCropEditingId={setCropEditingId}
                    isPreviewMode={isPreviewMode}

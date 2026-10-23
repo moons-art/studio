@@ -24,6 +24,7 @@ interface AccountModalProps {
   currentUser?: FirebaseUser | null;
   userProfile?: { name: string; email?: string; picture?: string } | null;
   onLogout?: () => void;
+  onOpenPolicy?: (tab: 'terms' | 'privacy' | 'business') => void;
 }
 
 export const AccountModal: React.FC<AccountModalProps> = ({
@@ -32,7 +33,8 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   onOpenPricing,
   currentUser,
   userProfile,
-  onLogout
+  onLogout,
+  onOpenPolicy
 }) => {
   const { albums, songs, savedContis, isSyncing } = useHymnal();
   const [cacheSize, setCacheSize] = useState<string>('계산 중...');
@@ -443,6 +445,45 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                 계정 삭제
               </button>
             </div>
+          </div>
+
+          {/* 6. 이용약관, 개인정보처리방침, 사업자 정보, 앱 버전 & 서버 동기화 푸터 */}
+          <div className="pt-3 border-t border-[#EAE8E1] space-y-2 text-center">
+            <div className="flex items-center justify-center gap-2 text-[11px] text-[#7D786F] flex-wrap">
+              <button
+                type="button"
+                onClick={() => onOpenPolicy?.('terms')}
+                className="hover:text-[#DA7756] hover:underline cursor-pointer"
+              >
+                이용약관
+              </button>
+              <span>•</span>
+              <button
+                type="button"
+                onClick={() => onOpenPolicy?.('privacy')}
+                className="hover:text-[#DA7756] hover:underline cursor-pointer"
+              >
+                개인정보처리방침
+              </button>
+              <span>•</span>
+              <button
+                type="button"
+                onClick={() => onOpenPolicy?.('business')}
+                className="hover:text-[#DA7756] hover:underline cursor-pointer"
+              >
+                사업자정보
+              </button>
+            </div>
+
+            <div className="flex items-center justify-center gap-3 text-[10px] text-[#A39E94] pt-1">
+              <span className="font-mono text-[#8C877D]">v1.1</span>
+              <span>•</span>
+              <div className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-[#8C877D]">서버 최신 동기화</span>
+              </div>
+            </div>
+            <p className="text-[10px] text-[#A39E94]">© 2026 NATIONS STUDIO. All rights reserved.</p>
           </div>
         </div>
       </div>

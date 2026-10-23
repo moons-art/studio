@@ -21,21 +21,31 @@ export const SermonListModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
 
   useEffect(() => {
     const handleAuth = async () => {
-      const { gdriveWebService } = await import('../api/gdriveWebService');
-      const token = gdriveWebService.getAccessToken();
-      if (!token || token === 'mock_local_token_123') {
-        if (auth.currentUser?.uid) {
-          setGoogleUserId(auth.currentUser.uid);
-          
-        }
-        return;
+      let uid = auth.currentUser?.uid || null;
+
+      if (!uid) {
+        try {
+          const { gdriveWebService } = await import('../api/gdriveWebService');
+          const token = gdriveWebService.getAccessToken();
+          if (token && token !== 'mock_local_token_123') {
+            const profile = await fetchUserProfile(token);
+            if (profile?.id) uid = profile.id;
+          }
+        } catch {}
       }
-      const profile = await fetchUserProfile(token);
-      if (!profile || !profile.id) return;
-      setGoogleUserId(profile.id);
+
+      if (!uid) {
+        try {
+          const offline = localStorage.getItem('offline_user_profile');
+          if (offline) uid = JSON.parse(offline)?.uid || null;
+        } catch {}
+      }
+
+      if (!uid) return;
+      setGoogleUserId(uid);
 
       if (unsubscribeRef.current) unsubscribeRef.current();
-      const sermonsCol = collection(db, 'users', profile.id, 'sermons');
+      const sermonsCol = collection(db, 'users', uid, 'sermons');
       const unsubscribe = onSnapshot(sermonsCol, (snapshot) => {
         const data: Sermon[] = [];
         snapshot.forEach(docSnap => {
@@ -50,10 +60,12 @@ export const SermonListModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
     };
 
     window.addEventListener('gdrive_authenticated', handleAuth);
+    const unsubAuth = auth.onAuthStateChanged(() => handleAuth());
     handleAuth();
 
     return () => {
       window.removeEventListener('gdrive_authenticated', handleAuth);
+      unsubAuth();
       if (unsubscribeRef.current) unsubscribeRef.current();
     };
   }, []);

@@ -45,10 +45,18 @@ export interface FirestoreConti {
 export const hymnalFirestoreService = {
   /**
    * 현재 인증된 유저의 UID를 획득합니다.
-   * 비로그인 상태일 때는 'anonymous' 또는 로컬 게스트 ID를 반환합니다.
+   * 비동기 인증 복원 타이밍에도 안전하도록 offline_user_profile 백업을 지원합니다.
    */
   getCurrentUserId: (): string | null => {
-    return auth.currentUser?.uid || null;
+    if (auth.currentUser?.uid) return auth.currentUser.uid;
+    try {
+      const offline = localStorage.getItem('offline_user_profile');
+      if (offline) {
+        const parsed = JSON.parse(offline);
+        if (parsed?.uid) return parsed.uid;
+      }
+    } catch {}
+    return null;
   },
 
   // --------------------------------------------------------------------------
@@ -124,6 +132,7 @@ export const hymnalFirestoreService = {
   getUserSongs: async (): Promise<FirestoreSong[]> => {
     const { imageCache } = await import('../utils/imageCache');
     const songMap = new Map<string, FirestoreSong>();
+    const cloudSongIds = new Set<string>();
 
     // 1. IndexedDB에서 로컬 영구 보관된 사용자 악보 메타데이터 로드 (용량 무제한, 무조건 성공)
     try {
@@ -159,13 +168,20 @@ export const hymnalFirestoreService = {
         snap.forEach((d) => {
           const cloudSong = d.data() as FirestoreSong;
           if (cloudSong && cloudSong.id) {
+            cloudSongIds.add(cloudSong.id);
             songMap.set(cloudSong.id, cloudSong);
             // 클라우드 데이터를 로컬 IndexedDB에도 백업 동기화
             imageCache.saveSongMeta(cloudSong).catch(() => {});
           }
         });
+
+        // 4. 로컬에만 있고 클라우드에 아직 없는 사용자 곡이 있다면 백그라운드로 자동 업로드/동기화 (복구 메커니즘)
+        songMap.forEach((localSong, id) => {
+          if (!cloudSongIds.has(id) && (id.startsWith('song_') || localSong.albumId)) {
+            hymnalFirestoreService.saveUserSong(localSong).catch(() => {});
+          }
+        });
       } catch (err: any) {
-        // 권한 에러(Missing or insufficient permissions)나 오프라인 시에도 로컬 데이터가 이미 있으므로 안전함
         console.warn('[hymnalFirestoreService] Cloud songs fetch bypassed:', err?.message || err);
       }
     }
@@ -193,15 +209,25 @@ export const hymnalFirestoreService = {
       localStorage.setItem('nations_guest_songs', JSON.stringify(list));
     } catch {}
 
-    // 3. Firestore 원격 동기화 시도 (비동기로 진행하여 UI 지연 차단)
+    // 3. Firestore 원격 동기화 시도 (1KB 미만 초경량 메타데이터만 전송하여 1MB 한도 원천 방어)
     const uid = hymnalFirestoreService.getCurrentUserId();
     if (uid) {
       try {
-        const songDocRef = doc(db, `users/${uid}/songs/${song.id}`);
+        const cleanSong: any = { ...song };
+        // Base64 Data URL이 Firestore에 들어가서 1MB 한도를 초과하지 않도록 정제
+        if (typeof cleanSong.storageUrl === 'string' && cleanSong.storageUrl.startsWith('data:')) {
+          cleanSong.storageUrl = '';
+        }
+        if (typeof cleanSong.filePath === 'string' && cleanSong.filePath.startsWith('data:')) {
+          cleanSong.filePath = '';
+        }
+
+        const songDocRef = doc(db, `users/${uid}/songs/${cleanSong.id}`);
         await setDoc(songDocRef, {
-          ...song,
+          ...cleanSong,
           updatedAt: serverTimestamp(),
         }, { merge: true });
+        console.log(`[hymnalFirestoreService] Synced song to Firestore: ${cleanSong.title} (${cleanSong.id})`);
       } catch (err: any) {
         console.warn('[hymnalFirestoreService] Remote Firestore save bypassed (locally secured):', err?.message || err);
       }

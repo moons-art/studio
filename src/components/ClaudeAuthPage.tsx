@@ -170,13 +170,14 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
       // 데스크톱 PC 환경
       const success = await gdriveWebService.login();
       if (success) {
-        await gdriveWebService.getNationsRootFolderId();
-        await gdriveWebService.getAppFolderId('Nations Studio');
+        // 드라이브 폴더 보조 동기화는 백그라운드에서 안전하게 실행 (로그인 지연 방지)
+        gdriveWebService.getNationsRootFolderId().catch(() => {});
+        gdriveWebService.getAppFolderId('Nations Studio').catch(() => {});
         setTimeout(() => window.dispatchEvent(new Event('gdrive_authenticated')), 500);
         if (onSuccess) onSuccess();
         onClose();
       } else {
-        setErrorMsg('로그인 창이 닫혔거나 구글 인증이 완료되지 않았습니다.');
+        setErrorMsg('로그인 창이 닫혔거나 인증이 완료되지 않았습니다.');
         setIsLoading(false);
       }
     } catch (err: any) {
@@ -229,8 +230,8 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
       a: '콘티 편집기에서 [공유] 버튼을 클릭하면 고유 링크와 QR코드가 즉시 생성됩니다. 이 링크를 카카오톡 단체 채팅방에 보내면 팀원들은 별도의 가입이나 앱 설치 없이 스마트폰, 태블릿, PC에서 악보를 보며 실시간으로 연습할 수 있습니다.'
     },
     {
-      q: '구글 드라이브(Google Drive) 연동은 왜 필요한가요?',
-      a: '사용자의 악보와 콘티 데이터를 본인의 구글 드라이브(무료)에 안전하게 보관하기 위함입니다. 앱은 사용자의 악보를 안전하게 구글드라이브에 저장하여 모든 기기에서 실시간으로 악보와 콘티를 불러올수 있습니다.'
+      q: '악보와 콘티 데이터는 어디에 안전하게 보관되나요?',
+      a: 'STUDIO NATIONS는 네이션스 전용 클라우드 서버에 안전하게 암호화되어 보관됩니다. 따라서 어떤 기기나 브라우저에서 로그인하든 본인의 악보 라이브러리와 콘티를 실시간으로 언제 어디서나 불러올 수 있습니다.'
     },
     {
       q: '찬양 악보의 저작권은 어떻게 보호되나요?',

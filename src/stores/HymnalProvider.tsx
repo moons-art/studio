@@ -26,6 +26,7 @@ export interface ContiItem {
   isVisible: boolean; // 캔버스 표시 여부
   memoFontSize?: number; // 메모 글자 크기
   isMemoOpen?: boolean; // 메모창 열림 여부
+  memoPosition?: 'top' | 'bottom'; // 메모창 위치 (상단 / 하단)
   page?: number;       // 배치된 페이지 번호
 }
 
@@ -107,6 +108,12 @@ interface HymnalContextType {
   setSongs: React.Dispatch<React.SetStateAction<HymnalSong[]>>;
   setAlbums: React.Dispatch<React.SetStateAction<Album[]>>;
   setContiItems: React.Dispatch<React.SetStateAction<ContiItem[]>>;
+
+  // Global Upload Progress & Song List Toggle
+  uploadProgress: { processed: number; total: number } | null;
+  setUploadProgress: React.Dispatch<React.SetStateAction<{ processed: number; total: number } | null>>;
+  isListOpen: boolean;
+  setIsListOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 const HymnalContext = createContext<HymnalContextType | undefined>(undefined);
@@ -142,7 +149,7 @@ export const HymnalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // --- Conti Editor States ---
   const [contiItems, setContiItems] = useState<ContiItem[]>([]);
   const [contiTitle, setContiTitle] = useState('');
-  const [contiTitleFontSize, setContiTitleFontSize] = useState(48);
+  const [contiTitleFontSize, setContiTitleFontSize] = useState(30);
   const [showContiNumbers, setShowContiNumbers] = useState(true);
   const [paperSize, setPaperSize] = useState<'A4' | 'A3'>('A4');
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait');
@@ -159,6 +166,10 @@ export const HymnalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [showBuilder, setShowBuilder] = useState(false);
   const [editingAlbum, setEditingAlbum] = useState<Album | null>(null);
   const [showAllTooltips, setShowAllTooltips] = useState(true);
+
+  // Global Upload Progress & Song List Panel State
+  const [uploadProgress, setUploadProgress] = useState<{ processed: number; total: number } | null>(null);
+  const [isListOpen, setIsListOpen] = useState(true);
 
   const reloadSettings = async () => {
     const settings = await hymnalApi.getSettings();
@@ -247,7 +258,7 @@ export const HymnalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (lastContiData) {
           setContiItems(lastContiData.items || []);
           setContiTitle(lastContiData.title || '');
-          setContiTitleFontSize(lastContiData.contiTitleFontSize || 48);
+          setContiTitleFontSize(lastContiData.contiTitleFontSize || 30);
           setShowContiNumbers(lastContiData.showContiNumbers !== undefined ? lastContiData.showContiNumbers : true);
           setPaperSize(lastContiData.paperSize || 'A4');
           setOrientation(lastContiData.orientation || 'portrait');
@@ -455,7 +466,7 @@ export const HymnalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setContiTitle(target.title || '');
     setPaperSize(target.paperSize || 'A4');
     setOrientation(target.orientation || 'portrait');
-    setContiTitleFontSize(target.contiTitleFontSize || 48);
+    setContiTitleFontSize(target.contiTitleFontSize || 30);
     setShowContiNumbers(target.showContiNumbers !== undefined ? target.showContiNumbers : true);
     setCurrentContiId(target.id);
     setIsEditorOpen(true);
@@ -678,7 +689,11 @@ export const HymnalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       reloadSettings,
       setSongs,
       setAlbums,
-      setContiItems
+      setContiItems,
+      uploadProgress,
+      setUploadProgress,
+      isListOpen,
+      setIsListOpen
     }}>
       {children}
     </HymnalContext.Provider>
