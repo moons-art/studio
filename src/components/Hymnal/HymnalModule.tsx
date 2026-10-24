@@ -28,13 +28,29 @@ import {
   FileText,
   Copy,
   Check,
-  Save
+  Save,
+  Volume2,
+  Sliders,
+  Piano as PianoIcon,
+  Play,
+  BookmarkPlus,
+  CheckCircle2,
+  Radio
 } from 'lucide-react';
 import { logActivity } from '../../utils/logger';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SavedContisModal } from './SavedContisModal';
+import { VirtualPiano } from './VirtualPiano';
+import { ChordBuilderModal } from './ChordBuilderModal';
+import { InteractiveChordViewer } from './InteractiveChordViewer';
+import { SongFormBuilder } from './SongFormBuilder';
+import { LiveStagePrompter } from './LiveStagePrompter';
+import type { SongFormBlock } from '../../types/hymnal';
+import { soundEngine, type InstrumentType } from '../../utils/soundEngine';
+import { transposeSongText, transposeChordString, getChordNotes, extractPureLyrics, type ChordNoteInfo } from '../../utils/musicTheory';
 import { hymnalApi } from '../../api/hymnalApi';
 import { TooltipIcon } from '../TooltipIcon';
+import { searchYoutubeVideos, getYoutubeEmbedUrl, type YoutubeSearchResult } from '../../api/youtubeService';
 
 const DriveImage = ({ fileId, storageUrl, alt, className }: { fileId: string, storageUrl?: string, alt?: string, className?: string }) => {
   const [src, setSrc] = useState<string | null>(null);
@@ -224,7 +240,11 @@ export const HymnalModule: React.FC = () => {
   const [editedVideos, setEditedVideos] = useState<{name: string, url: string, isShared?: boolean}[]>([]);
   const [activeVideoIndex, setActiveVideoIndex] = useState(0);
   const [showYoutubePlayer, setShowYoutubePlayer] = useState(false);
-  const [showCodeText, setShowCodeText] = useState(false);
+  const [showCodeText, setShowCodeText] = useState(true); // 기본으로 코드 텍스트/송폼 우측 패널 표시
+  const [rightPanelTab, setRightPanelTab] = useState<'chordText' | 'songForm'>('chordText'); // 'chordText' (코드악보TEXT) vs 'songForm' (송폼편집)
+  const [showPrompter, setShowPrompter] = useState(false);
+  const [prompterBlocks, setPrompterBlocks] = useState<SongFormBlock[]>([]);
+  const [isSavingSongForm, setIsSavingSongForm] = useState(false);
   const [youtubeWidth, setYoutubeWidth] = useState(480);
   const [isResizingYoutube, setIsResizingYoutube] = useState(false);
   const [copiedLyrics, setCopiedLyrics] = useState(false);
@@ -235,6 +255,22 @@ export const HymnalModule: React.FC = () => {
   const [visibleCount, setVisibleCount] = useState(50);
   const [swipedSongId, setSwipedSongId] = useState<string | null>(null);
   const [isDraggingSong, setIsDraggingSong] = useState(false);
+
+  // --- 음악 및 코드 관련 UI 상태 ---
+  const [chordViewMode, setChordViewMode] = useState<'play' | 'edit'>('edit'); // 기본은 'edit'(수정 가능한 텍스트 모드)
+  const [selectedInstrument, setSelectedInstrument] = useState<InstrumentType>('piano');
+  const [transposeOffset, setTransposeOffset] = useState<number>(0);
+  const [showVirtualPiano, setShowVirtualPiano] = useState(false); // [코드 듣기] 누르면 활성화
+  const [activePianoNotes, setActivePianoNotes] = useState<ChordNoteInfo[]>([]);
+  const [showChordBuilder, setShowChordBuilder] = useState(false);
+
+  // --- 유튜브 검색 및 라이브러리 실시간 추가 상태 ---
+  const [youtubeSearchQuery, setYoutubeSearchQuery] = useState('');
+  const [youtubeSearchResults, setYoutubeSearchResults] = useState<YoutubeSearchResult[]>([]);
+  const [isSearchingYoutube, setIsSearchingYoutube] = useState(false);
+  const [activePreviewVideoId, setActivePreviewVideoId] = useState<string | null>(null);
+  const [videoAddedNotice, setVideoAddedNotice] = useState<string | null>(null);
+  const [youtubeTab, setYoutubeTab] = useState<'search' | 'library'>('search');
 
   // 유튜브 패널 마우스 드래그 너비 조절 리스너
   useEffect(() => {
@@ -330,47 +366,173 @@ export const HymnalModule: React.FC = () => {
     }
   }, [showYoutubePlayer]);
 
-  // 곡 변경 시 줌 초기화 (60%를 기본값으로)
+  // 곡 변경 시 줌 초기화 및 상태 설정
   useEffect(() => {
     setZoomScale(0.6);
     setIsEditing(false);
     setIsDeleteOriginal(false); // 삭제 옵션 초기화
     setShowYoutubePlayer(false); // 곡 변경 시 플레이어 닫기
-    setShowCodeText(false); // 곡 변경 시 코드 텍스트 닫기
+    setShowCodeText(true); // 기본으로 코드 텍스트 창 표시
+    setChordViewMode('edit'); // 기본은 수정 가능한 텍스트 모드
+    setShowVirtualPiano(false);
     setActiveVideoIndex(0); // 첫 번째 영상으로 초기화
+    setActivePreviewVideoId(null);
+    setTransposeOffset(0); // 조옮김 초기화
+    setActivePianoNotes([]); // 건반 하이라이트 초기화
   }, [selectedSongId]);
 
-  // 선택된 곡의 가사를 코드 텍스트 편집기에 동기화
+  // 유튜브 검색 실행 핸들러
+  const handleSearchYoutube = async (queryOverride?: string) => {
+    const q = (queryOverride !== undefined ? queryOverride : youtubeSearchQuery) || selectedSong?.title || '';
+    if (!q.trim()) return;
+    setIsSearchingYoutube(true);
+    setYoutubeSearchQuery(q);
+    try {
+      const results = await searchYoutubeVideos(q);
+      setYoutubeSearchResults(results);
+    } catch (err) {
+      console.warn('[HymnalModule] searchYoutubeVideos error:', err);
+    } finally {
+      setIsSearchingYoutube(false);
+    }
+  };
+
+  // 유튜브 패널이 열리거나 곡이 바뀔 때 자동 검색 동기화
   useEffect(() => {
-    setLyricsEditValue(selectedSong?.lyrics || '');
+    if (selectedSong?.title) {
+      setYoutubeSearchQuery(selectedSong.title);
+      setActivePreviewVideoId(null);
+      if (showYoutubePlayer) {
+        handleSearchYoutube(selectedSong.title);
+      }
+    }
+  }, [selectedSong?.id, showYoutubePlayer]);
+
+  // 검색 결과에서 내 영상 라이브러리에 바로 추가
+  const handleAddVideoToLibrary = async (video: { videoId: string; title: string }) => {
+    if (!selectedSongId || !selectedSong) return;
+    const currentVideos = selectedSong.youtubeVideos || [];
+    const videoUrl = `https://www.youtube.com/watch?v=${video.videoId}`;
+    
+    // 이미 등록되어 있는지 확인
+    if (currentVideos.some(v => v.url?.includes(video.videoId))) {
+      alert('이미 등록된 찬양 영상입니다.');
+      return;
+    }
+
+    const newVideoItem = {
+      name: video.title,
+      url: videoUrl,
+      isShared: true,
+    };
+
+    const updatedVideos = [...currentVideos, newVideoItem];
+
+    // 1. 낙관적 UI 업데이트
+    setSongs(prev => prev.map(s => s.id === selectedSongId ? { ...s, youtubeVideos: updatedVideos } : s));
+    setActiveVideoIndex(updatedVideos.length - 1);
+    setActivePreviewVideoId(video.videoId);
+
+    // 2. 백그라운드 DB 저장
+    const res = await hymnalApi.updateSong({ id: selectedSongId, youtubeVideos: updatedVideos });
+    if (res.success) {
+      setVideoAddedNotice(video.videoId);
+      setTimeout(() => setVideoAddedNotice(null), 2500);
+    }
+  };
+
+  // 라이브러리에서 영상 삭제
+  const handleRemoveVideoFromLibrary = async (idxToRemove: number) => {
+    if (!selectedSongId || !selectedSong) return;
+    if (!confirm('이 찬양 영상을 라이브러리에서 삭제하시겠습니까?')) return;
+    const currentVideos = selectedSong.youtubeVideos || [];
+    const updatedVideos = currentVideos.filter((_, idx) => idx !== idxToRemove);
+
+    setSongs(prev => prev.map(s => s.id === selectedSongId ? { ...s, youtubeVideos: updatedVideos } : s));
+    if (activeVideoIndex >= updatedVideos.length) {
+      setActiveVideoIndex(Math.max(0, updatedVideos.length - 1));
+    }
+    setActivePreviewVideoId(null);
+
+    await hymnalApi.updateSong({ id: selectedSongId, youtubeVideos: updatedVideos });
+  };
+
+  // 선택된 곡의 코드/가사 텍스트를 코드 텍스트 편집기에 동기화
+  useEffect(() => {
+    // chordText가 있으면 chordText 우선, 없으면 기존 lyrics 사용
+    const initialChordText = selectedSong?.chordText || selectedSong?.lyrics || '';
+    setLyricsEditValue(initialChordText);
     setLyricsSavedNotice(false);
-  }, [selectedSong?.id, selectedSong?.lyrics]);
+    setTransposeOffset(0);
+    setActivePianoNotes([]);
+  }, [selectedSong?.id, selectedSong?.chordText, selectedSong?.lyrics]);
 
   // 코드 텍스트 창에서 가사/코드 즉시 저장 핸들러
   const handleSaveLyrics = async () => {
     if (!selectedSongId || !selectedSong) return;
     setIsSavingLyrics(true);
     try {
-      const updatedData = {
-        lyrics: lyricsEditValue,
+      // 1. 코드 텍스트에서 순수 가사도 자동 추출
+      const pureLyrics = extractPureLyrics(lyricsEditValue);
+
+      const updatedData: Partial<HymnalSong> & { updatedAt: string } = {
+        chordText: lyricsEditValue,
+        // 상세편집용 lyrics: 기존 lyrics가 이미 순수 가사라면 유지하고, 비어있거나 코드가 섞여있었다면 순수 가사로 갱신
+        lyrics: (selectedSong.lyrics && !selectedSong.lyrics.match(/[A-G][#b]?m?/)) ? selectedSong.lyrics : (pureLyrics || selectedSong.lyrics || ''),
         isManual: true,
         updatedAt: new Date().toISOString()
       };
+
       // UI 즉시 반영 (낙관적 업데이트)
       setSongs(prev => prev.map(s => s.id === selectedSongId ? { ...s, ...updatedData } : s));
       
       const result = await hymnalApi.updateSong({ id: selectedSongId, ...updatedData });
       if (!result.success) {
-        console.error('[HymnalModule] 가사 저장 실패:', result.error);
+        console.error('[HymnalModule] 코드 텍스트 저장 실패:', result.error);
       }
       setLyricsSavedNotice(true);
       setTimeout(() => setLyricsSavedNotice(false), 2000);
     } catch (err) {
-      console.error('[HymnalModule] 가사 저장 에러:', err);
-      alert('가사 저장 중 오류가 발생했습니다.');
+      console.error('[HymnalModule] 코드 텍스트 저장 에러:', err);
+      alert('코드 및 가사 저장 중 오류가 발생했습니다.');
     } finally {
       setIsSavingLyrics(false);
     }
+  };
+
+  // 반음 올림/내림 (조옮김: Transpose) 핸들러
+  const handleTranspose = (semitones: number) => {
+    if (!lyricsEditValue) return;
+    const newOffset = transposeOffset + semitones;
+    setTransposeOffset(newOffset);
+    // 현재 가사/코드 텍스트의 모든 코드를 반음 변환
+    const transposedText = transposeSongText(lyricsEditValue, semitones);
+    setLyricsEditValue(transposedText);
+
+    // 선택된 곡의 대표 Key가 있다면 그것도 함께 변환 표시
+    if (selectedSong?.code) {
+      const transposedKey = transposeChordString(selectedSong.code, semitones);
+      // 낙관적 곡 코드 업데이트
+      setSongs(prev => prev.map(s => s.id === selectedSong.id ? { ...s, code: transposedKey } : s));
+    }
+  };
+
+  // 코드 생성기에서 코드 텍스트에 삽입하는 핸들러 (코드 카드로 진입)
+  const handleInsertChordFromBuilder = (chordToAdd: string) => {
+    // 1. 코드 구성음 계산 후 즉시 사운드 및 피아노 건반 하이라이트
+    const notes = getChordNotes(chordToAdd);
+    if (notes.length > 0) {
+      soundEngine.playChord(notes, selectedInstrument);
+      setActivePianoNotes(notes);
+    }
+
+    // 2. 텍스트에 코드 추가 (첫 줄이거나 마지막 줄에 코드 카드 형태로 진입)
+    setLyricsEditValue(prev => {
+      if (!prev || !prev.trim()) return chordToAdd;
+      const lines = prev.split('\n');
+      // 가장 첫 줄이나 마지막 줄에 코드 배치
+      return `${prev}\n${chordToAdd}`;
+    });
   };
 
   // --- 편집 모드 핸들러 ---
@@ -380,9 +542,10 @@ export const HymnalModule: React.FC = () => {
     if (!confirm('수정된 정보를 저장하시겠습니까?')) return;
     
     // 1. 낙관적 UI 업데이트 (즉시 화면에 반영)
-    const updatedData = {
+    const updatedData: Partial<HymnalSong> = {
       title: editedTitle,
-      lyrics: editedLyrics,
+      lyrics: editedLyrics, // 순수 가사만 저장
+      chordText: selectedSong?.chordText, // 정교한 코드 텍스트 보존
       number: editedNumber,
       code: editedCode,
       meter: editedMeter,
@@ -457,13 +620,17 @@ export const HymnalModule: React.FC = () => {
         ? formatScoreSectionsToText(result.sections) 
         : (result.firstLyric || selectedSong.lyrics || '');
 
-      const updatedSongData = {
+      // 코드와 순수 가사 분리
+      const pureLyrics = extractPureLyrics(formattedLyrics);
+
+      const updatedSongData: Partial<HymnalSong> & { updatedAt: string } = {
         title: newTitle,
         code: newCode,
         meter: newMeter,
         category: newCategory,
         songForm: newSongForm,
-        lyrics: formattedLyrics,
+        chordText: formattedLyrics, // 코드 텍스트 창용
+        lyrics: pureLyrics || formattedLyrics, // 상세편집 가사용 (코드 제외 순수 가사)
         isManual: true,
         updatedAt: new Date().toISOString()
       };
@@ -477,7 +644,7 @@ export const HymnalModule: React.FC = () => {
       setEditedCode(newCode);
       setEditedMeter(newMeter);
       setEditedCategory(newCategory);
-      setEditedLyrics(formattedLyrics);
+      setEditedLyrics(pureLyrics || formattedLyrics);
 
       // 2. 백그라운드 DB 저장
       hymnalApi.updateSong({ id: selectedSong.id, ...updatedSongData }).catch(err => {
@@ -500,7 +667,9 @@ export const HymnalModule: React.FC = () => {
   const startEditing = () => {
     if (selectedSong) {
       setEditedTitle(selectedSong.title);
-      setEditedLyrics(selectedSong.lyrics);
+      // 상세편집에는 코드 빼고 순수 가사만 넣어주기
+      const pure = extractPureLyrics(selectedSong.lyrics || selectedSong.chordText || '');
+      setEditedLyrics(pure || selectedSong.lyrics || '');
       setEditedNumber(selectedSong.number);
       setEditedCode(selectedSong.code || '');
       setEditedMeter(selectedSong.meter || '');
@@ -926,21 +1095,21 @@ export const HymnalModule: React.FC = () => {
                             <span>상세편집</span>
                           </button>
 
-                          {/* 유튜브 영상 버튼 - 항상 '유튜브영상'으로 고정 */}
+                          {/* 유튜브 영상 버튼 - 패널 열기 및 검색 */}
                           <button 
                             onClick={() => {
-                              if (!selectedSong?.youtubeVideos || selectedSong.youtubeVideos.length === 0) {
-                                alert('등록된 유튜브 영상이 없습니다.\n[상세편집] 버튼을 눌러 유튜브 영상 링크를 추가해 주세요.');
-                                return;
+                              const next = !showYoutubePlayer;
+                              setShowYoutubePlayer(next);
+                              if (next && selectedSong) {
+                                handleSearchYoutube(selectedSong.title);
                               }
-                              setShowYoutubePlayer(!showYoutubePlayer);
                             }}
                             className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer border shadow-2xs ${
                               showYoutubePlayer 
                                 ? 'bg-[#FAF0EB] text-[#C96442] border-[#F1D3C6] font-semibold' 
                                 : 'bg-white text-[#4A4741] hover:text-[#C96442] hover:bg-[#FAF0EB] border-[#E7E5DF]'
                             }`}
-                            title="유튜브 찬양 영상 패널 열기/닫기"
+                            title="유튜브 찬양 영상 패널 및 검색 열기/닫기"
                           >
                             <Youtube className={`w-3.5 h-3.5 ${showYoutubePlayer ? 'text-[#C96442]' : 'text-[#6E6A63]'}`} />
                             <span>유튜브영상</span>
@@ -949,25 +1118,53 @@ export const HymnalModule: React.FC = () => {
                             )}
                           </button>
 
-                          {/* 코드 TEXT (유튜브 영상 아래 칸 토글) */}
+                          {/* 코드악보TEXT (악보 우측 코드 & 가사 창 토글/선택) */}
                           <button 
                             onClick={() => {
-                              if (!showYoutubePlayer) {
-                                setShowYoutubePlayer(true);
+                              if (!showCodeText) {
                                 setShowCodeText(true);
+                                setRightPanelTab('chordText');
+                              } else if (rightPanelTab === 'chordText') {
+                                setShowCodeText(false);
                               } else {
-                                setShowCodeText(!showCodeText);
+                                setRightPanelTab('chordText');
                               }
                             }}
                             className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer border shadow-2xs ${
-                              showCodeText && showYoutubePlayer
+                              showCodeText && rightPanelTab === 'chordText'
                                 ? 'bg-[#FAF0EB] text-[#C96442] border-[#F1D3C6] font-semibold' 
                                 : 'bg-white text-[#4A4741] hover:text-[#C96442] hover:bg-[#FAF0EB] border-[#E7E5DF]'
                             }`}
-                            title="유튜브 영상 아래 코드 & 가사 텍스트 열기/닫기"
+                            title="악보 우측 코드 & 가사 창 열기/닫기"
                           >
-                            <FileText className={`w-3.5 h-3.5 stroke-[1.8px] ${showCodeText && showYoutubePlayer ? 'text-[#C96442]' : 'text-[#6E6A63]'}`} />
-                            <span>코드 TEXT</span>
+                            <FileText className={`w-3.5 h-3.5 stroke-[1.8px] ${showCodeText && rightPanelTab === 'chordText' ? 'text-[#C96442]' : 'text-[#6E6A63]'}`} />
+                            <span>코드악보TEXT</span>
+                          </button>
+
+                          {/* 송폼편집 (악보 우측 송폼 빌더 창 토글/선택) */}
+                          <button 
+                            onClick={() => {
+                              if (!showCodeText) {
+                                setShowCodeText(true);
+                                setRightPanelTab('songForm');
+                              } else if (rightPanelTab === 'songForm') {
+                                setShowCodeText(false);
+                              } else {
+                                setRightPanelTab('songForm');
+                              }
+                            }}
+                            className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer border shadow-2xs ${
+                              showCodeText && rightPanelTab === 'songForm'
+                                ? 'bg-[#181822] text-[#E07A5F] border-[#38384A] font-semibold shadow-xs' 
+                                : 'bg-white text-[#4A4741] hover:text-[#E07A5F] hover:bg-[#FAF0EB] border-[#E7E5DF]'
+                            }`}
+                            title="악보 우측 송폼(Song Form) 빌더 열기/닫기"
+                          >
+                            <Radio className={`w-3.5 h-3.5 stroke-[1.8px] ${showCodeText && rightPanelTab === 'songForm' ? 'text-[#E07A5F]' : 'text-[#6E6A63]'}`} />
+                            <span>송폼편집</span>
+                            {selectedSong?.songForm && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-[#E07A5F]" />
+                            )}
                           </button>
                         </div>
 
@@ -998,65 +1195,377 @@ export const HymnalModule: React.FC = () => {
               {/* Viewer Main Body (악보패널과 유튜브 패널이 나란히 위치하여 악보가 밀려남, 덮지 않음) */}
               <div className="flex-1 flex overflow-hidden bg-[#FAF9F5] relative">
                 
-                {/* 1. 악보 뷰어 영역 (flex-1: 유튜브 패널이 열리면 악보패널이 자연스럽게 왼쪽으로 밀려남) */}
-                <div className="flex-1 flex flex-col h-full overflow-hidden relative min-w-0">
-                  <div className="flex-1 overflow-auto p-8 custom-scrollbar relative">
-                    {isEditing && (
-                      <div className="mb-6 max-w-4xl mx-auto">
-                        <p className="text-[10px] font-bold text-[#A3A19B] uppercase tracking-wider mb-2 pl-1">가사 편집</p>
-                        <textarea 
-                          value={editedLyrics}
-                          onChange={(e) => setEditedLyrics(e.target.value)}
-                          className="w-full h-36 px-5 py-3.5 bg-white border border-[#E7E5DF] rounded-2xl text-xs leading-relaxed focus:outline-none focus:border-[#C96442] focus:ring-2 focus:ring-[#C96442]/10 text-[#2C2B29] font-serif shadow-2xs"
-                          placeholder="가사를 입력해 주세요..."
+                {/* 1. 악보 뷰어 + 우측 코드 텍스트 2분할 메인 영역 */}
+                <div className="flex-1 flex flex-col xl:flex-row h-full overflow-hidden relative min-w-0">
+                  
+                  {/* 1-A. 좌측: 악보 이미지 영역 */}
+                  <div className="flex-1 flex flex-col h-full overflow-hidden relative min-w-0">
+                    <div className="flex-1 overflow-auto p-4 sm:p-8 custom-scrollbar relative">
+                      {isEditing && (
+                        <div className="mb-6 max-w-4xl mx-auto">
+                          <p className="text-[10px] font-bold text-[#A3A19B] uppercase tracking-wider mb-2 pl-1">가사 편집 (코드 제외 순수 가사)</p>
+                          <textarea 
+                            value={editedLyrics}
+                            onChange={(e) => setEditedLyrics(e.target.value)}
+                            className="w-full h-36 px-5 py-3.5 bg-white border border-[#E7E5DF] rounded-2xl text-xs leading-relaxed focus:outline-none focus:border-[#C96442] focus:ring-2 focus:ring-[#C96442]/10 text-[#2C2B29] font-serif shadow-2xs"
+                            placeholder="코드를 제외한 순수 찬양 가사를 입력해 주세요..."
+                          />
+                        </div>
+                      )}
+                      
+                      <div 
+                        className="bg-white shadow-md border border-[#E7E5DF] rounded-2xl mx-auto overflow-hidden transform-gpu origin-top"
+                        style={{ 
+                          width: `${850 * zoomScale}px`,
+                          height: 'fit-content'
+                        }}
+                      >
+                        <DriveImage 
+                          fileId={selectedSong?.fileId || selectedSong?.id || ''} 
+                          storageUrl={selectedSong?.storageUrl || selectedSong?.filePath || ''}
+                          alt={selectedSong?.title}
+                          className="w-full h-auto block" 
                         />
                       </div>
-                    )}
-                    
-                    <div 
-                      className="bg-white shadow-md border border-[#E7E5DF] rounded-2xl mx-auto overflow-hidden transform-gpu origin-top"
-                      style={{ 
-                        width: `${850 * zoomScale}px`,
-                        height: 'fit-content'
-                      }}
-                    >
-                      <DriveImage 
-                        fileId={selectedSong?.fileId || selectedSong?.id || ''} 
-                        storageUrl={selectedSong?.storageUrl || selectedSong?.filePath || ''}
-                        alt={selectedSong?.title}
-                        className="w-full h-auto block" 
-                      />
+                    </div>
+
+                    {/* Floating Zoom Controls - 악보 영역의 정중앙 하단에 위치 */}
+                    <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20 pointer-events-auto">
+                      <div className="flex items-center bg-white/95 text-[#2C2B29] rounded-full shadow-lg p-1.5 gap-1 backdrop-blur-md border border-[#E7E5DF]">
+                        <button 
+                          onClick={() => setZoomScale(Math.max(zoomScale - 0.2, 0.4))}
+                          className="p-1.5 hover:bg-[#F5F3ED] rounded-full transition-colors cursor-pointer text-[#6A6864] hover:text-[#2C2B29]"
+                          title="축소"
+                        >
+                          <ZoomOut className="w-4 h-4 stroke-[1.5px]" />
+                        </button>
+                        <div className="px-2.5 min-w-[44px] text-center border-x border-[#E7E5DF]">
+                          <span className="text-xs font-semibold">{Math.round(zoomScale * 100)}%</span>
+                        </div>
+                        <button 
+                          onClick={() => setZoomScale(Math.min(zoomScale + 0.2, 3))}
+                          className="p-1.5 hover:bg-[#F5F3ED] rounded-full transition-colors cursor-pointer text-[#6A6864] hover:text-[#2C2B29]"
+                          title="확대"
+                        >
+                          <ZoomIn className="w-4 h-4 stroke-[1.5px]" />
+                        </button>
+                        <button 
+                          onClick={() => setZoomScale(0.6)}
+                          className="ml-1 px-3 py-1 bg-[#F5F3ED] hover:bg-[#ECEAE4] text-[#2C2B29] rounded-full text-[10px] font-semibold transition-all border border-[#E7E5DF] cursor-pointer"
+                        >
+                          기본
+                        </button>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Floating Zoom Controls - 밀려난 악보 영역의 정중앙에 위치 */}
-                  <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20 pointer-events-auto">
-                    <div className="flex items-center bg-white/95 text-[#2C2B29] rounded-full shadow-lg p-1.5 gap-1 backdrop-blur-md border border-[#E7E5DF]">
-                      <button 
-                        onClick={() => setZoomScale(Math.max(zoomScale - 0.2, 0.4))}
-                        className="p-1.5 hover:bg-[#F5F3ED] rounded-full transition-colors cursor-pointer text-[#6A6864] hover:text-[#2C2B29]"
-                        title="축소"
-                      >
-                        <ZoomOut className="w-4 h-4 stroke-[1.5px]" />
-                      </button>
-                      <div className="px-2.5 min-w-[44px] text-center border-x border-[#E7E5DF]">
-                        <span className="text-xs font-semibold">{Math.round(zoomScale * 100)}%</span>
+                  {/* 1-B. 우측: 코드 텍스트 / 송폼 창 (악보 우측 나란히 배치) */}
+                  {showCodeText && (
+                    <div className="w-full xl:w-[480px] 2xl:w-[540px] flex flex-col h-full bg-[#FAF9F5] border-t xl:border-t-0 xl:border-l border-[#E7E5DF] shrink-0 overflow-hidden shadow-xs">
+                      {/* 최상단 탭 바: [코드악보TEXT] vs [송폼편집] */}
+                      <div className="px-3 py-2 bg-[#F3EFEA] border-b border-[#E7E5DF] flex items-center justify-between gap-2 shrink-0">
+                        <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-[#E7E5DF] shadow-2xs">
+                          <button
+                            type="button"
+                            onClick={() => setRightPanelTab('chordText')}
+                            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                              rightPanelTab === 'chordText'
+                                ? 'bg-[#FAF0EB] text-[#C96442] shadow-2xs'
+                                : 'text-[#6A6864] hover:text-[#2C2B29]'
+                            }`}
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            <span>코드악보TEXT</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setRightPanelTab('songForm')}
+                            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                              rightPanelTab === 'songForm'
+                                ? 'bg-[#181822] text-[#E07A5F] shadow-2xs'
+                                : 'text-[#6A6864] hover:text-[#2C2B29]'
+                            }`}
+                          >
+                            <Radio className="w-3.5 h-3.5" />
+                            <span>송폼편집</span>
+                            {selectedSong?.songForm && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-[#E07A5F]" />
+                            )}
+                          </button>
+                        </div>
+
+                        <button
+                          onClick={() => setShowCodeText(false)}
+                          className="p-1 hover:bg-[#E7E5DF] rounded-lg text-[#A3A19B] hover:text-[#2C2B29] transition-colors cursor-pointer"
+                          title="우측 패널 닫기"
+                        >
+                          <X className="w-4 h-4 stroke-[1.8px]" />
+                        </button>
                       </div>
-                      <button 
-                        onClick={() => setZoomScale(Math.min(zoomScale + 0.2, 3))}
-                        className="p-1.5 hover:bg-[#F5F3ED] rounded-full transition-colors cursor-pointer text-[#6A6864] hover:text-[#2C2B29]"
-                        title="확대"
-                      >
-                        <ZoomIn className="w-4 h-4 stroke-[1.5px]" />
-                      </button>
-                      <button 
-                        onClick={() => setZoomScale(0.6)}
-                        className="ml-1 px-3 py-1 bg-[#F5F3ED] hover:bg-[#ECEAE4] text-[#2C2B29] rounded-full text-[10px] font-semibold transition-all border border-[#E7E5DF] cursor-pointer"
-                      >
-                        기본
-                      </button>
+
+                      {rightPanelTab === 'chordText' ? (
+                        <>
+                          {/* 상단 1열: [코드 & 가사] Key뱃지 ------------------ [조옮김] [복사] [저장] */}
+                          <div className="p-3 bg-[#FAF9F5] border-b border-[#E7E5DF] flex flex-col gap-2 shrink-0">
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-2">
+                                <FileText className="w-4 h-4 text-[#C96442]" />
+                                <span className="text-xs font-bold text-[#2C2B29]">코드 & 가사</span>
+                                {selectedSong?.code && (
+                                  <span className="px-1.5 py-0.5 bg-[#FAF0EB] text-[#C96442] rounded text-[10px] font-bold border border-[#F1D3C6]">
+                                    {selectedSong.code} KEY
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {/* 조옮김 컨트롤러 */}
+                                <div className="flex items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-lg border border-[#E7E5DF] shadow-2xs">
+                                  <span className="text-[10px] font-bold text-[#8C877D] mr-1">조옮김</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleTranspose(-1)}
+                                    className="w-5 h-5 flex items-center justify-center hover:bg-[#FAF0EB] text-[#2C2B29] hover:text-[#C96442] font-bold rounded text-xs transition-colors cursor-pointer"
+                                    title="반음 내리기 (-1)"
+                                  >
+                                    -
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (transposeOffset !== 0) handleTranspose(-transposeOffset);
+                                    }}
+                                    className="px-1.5 h-5 flex items-center justify-center text-[10px] font-mono font-bold text-[#4A4741] hover:text-[#C96442] cursor-pointer"
+                                    title="원래 키로 리셋"
+                                  >
+                                    {transposeOffset === 0 ? '원키' : `${transposeOffset > 0 ? `+${transposeOffset}` : transposeOffset}`}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleTranspose(1)}
+                                    className="w-5 h-5 flex items-center justify-center hover:bg-[#FAF0EB] text-[#2C2B29] hover:text-[#C96442] font-bold rounded text-xs transition-colors cursor-pointer"
+                                    title="반음 올리기 (+1)"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+
+                                {/* 복사 버튼 */}
+                                <button
+                                  onClick={() => {
+                                    if (lyricsEditValue) {
+                                      navigator.clipboard.writeText(lyricsEditValue);
+                                      setCopiedLyrics(true);
+                                      setTimeout(() => setCopiedLyrics(false), 2000);
+                                    }
+                                  }}
+                                  disabled={!lyricsEditValue}
+                                  className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-[#6A6864] hover:text-[#C96442] hover:bg-[#FAF0EB] bg-white border border-[#E7E5DF] rounded-lg transition-colors cursor-pointer shadow-2xs disabled:opacity-40"
+                                  title="코드 및 가사 텍스트 복사"
+                                >
+                                  {copiedLyrics ? (
+                                    <>
+                                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                      <span className="text-emerald-600 font-bold text-[11px]">복사됨</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Copy className="w-3.5 h-3.5" />
+                                      <span className="text-[11px]">복사</span>
+                                    </>
+                                  )}
+                                </button>
+
+                                {/* 저장 버튼 */}
+                                <button
+                                  onClick={handleSaveLyrics}
+                                  disabled={isSavingLyrics}
+                                  className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer shadow-2xs ${
+                                    lyricsSavedNotice
+                                      ? 'bg-emerald-600 text-white'
+                                      : 'bg-[#C96442] hover:bg-[#B55434] text-white active:scale-95'
+                                  }`}
+                                  title="가사 및 코드 변경사항 저장"
+                                >
+                                  {lyricsSavedNotice ? (
+                                    <>
+                                      <Check className="w-3.5 h-3.5 stroke-[2.5px]" />
+                                      <span className="text-[11px]">저장됨</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Save className="w-3.5 h-3.5 stroke-[2px]" />
+                                      <span className="text-[11px]">{isSavingLyrics ? '저장중' : '저장'}</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* 상단 2열: [코드생성기] + [코드 듣기 / 텍스트 수정] + (코드듣기 모드일 때 악기선택기) */}
+                            <div className="flex items-center justify-between gap-2 flex-wrap pt-1.5 border-t border-[#E7E5DF]/70">
+                              <div className="flex items-center gap-1.5">
+                                {/* 코드생성기 버튼 */}
+                                <button
+                                  type="button"
+                                  onClick={() => setShowChordBuilder(true)}
+                                  className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-[#C96442] bg-[#FAF0EB] hover:bg-[#F3DDD2] border border-[#F1D3C6] rounded-lg transition-all cursor-pointer shadow-2xs"
+                                  title="12반음 코드 조합 생성기 열기"
+                                >
+                                  <Plus className="w-3 h-3 stroke-[2.5px]" />
+                                  <span>코드생성기</span>
+                                </button>
+
+                                {/* 모드 전환: [코드 듣기] vs [텍스트 수정] */}
+                                {chordViewMode === 'edit' ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setChordViewMode('play');
+                                      setShowVirtualPiano(true);
+                                    }}
+                                    className="flex items-center gap-1.5 px-3 py-1 bg-[#2C2B29] hover:bg-[#1A1918] text-white rounded-lg text-[11px] font-bold transition-all shadow-2xs cursor-pointer active:scale-95"
+                                    title="코드를 터치하여 소리를 듣고 건반으로 확인하는 코드 듣기 모드로 전환"
+                                  >
+                                    <Volume2 className="w-3.5 h-3.5 text-[#F5A623]" />
+                                    <span>코드 듣기</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setChordViewMode('edit');
+                                      setShowVirtualPiano(false);
+                                    }}
+                                    className="flex items-center gap-1.5 px-3 py-1 bg-white hover:bg-[#FAF9F5] text-[#2C2B29] border border-[#E7E5DF] rounded-lg text-[11px] font-bold transition-all shadow-2xs cursor-pointer"
+                                    title="직접 가사와 코드를 타이핑하여 수정하는 텍스트 편집 모드로 복귀"
+                                  >
+                                    <Edit2 className="w-3.5 h-3.5 text-[#C96442]" />
+                                    <span>텍스트 수정</span>
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* 코드 듣기 모드일 때 등장하는 악기 선택기 */}
+                              {chordViewMode === 'play' && (
+                                <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-[#E7E5DF]">
+                                  {(['piano', 'guitar', 'strings'] as InstrumentType[]).map((inst) => {
+                                    const labels: Record<InstrumentType, string> = {
+                                      piano: '🎹 피아노',
+                                      guitar: '🎸 기타',
+                                      strings: '🎻 스트링'
+                                    };
+                                    return (
+                                      <button
+                                        key={inst}
+                                        type="button"
+                                        onClick={() => setSelectedInstrument(inst)}
+                                        className={`px-2 py-0.5 rounded-md text-[10px] font-medium transition-all cursor-pointer ${
+                                          selectedInstrument === inst
+                                            ? 'bg-[#C96442] text-white font-bold shadow-2xs'
+                                            : 'text-[#6A6864] hover:text-[#2C2B29]'
+                                        }`}
+                                      >
+                                        {labels[inst]}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* 본문: 기본 텍스트 수정 모드(textarea) vs 코드 듣기 모드(InteractiveChordViewer) */}
+                          <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative bg-white">
+                            {chordViewMode === 'edit' ? (
+                              <div className="flex-1 p-3 bg-white flex flex-col min-h-0 overflow-hidden">
+                                <textarea
+                                  value={lyricsEditValue}
+                                  onChange={(e) => setLyricsEditValue(e.target.value)}
+                                  placeholder="가사 및 코드를 입력하고 상단의 [저장] 버튼을 누르세요..."
+                                  className="flex-1 w-full p-3.5 font-chord text-xs sm:text-sm text-[#2C2B29] leading-relaxed resize-none border border-[#E7E5DF] rounded-xl focus:outline-none focus:border-[#C96442] focus:ring-1 focus:ring-[#C96442]/20 custom-scrollbar bg-white overflow-x-auto whitespace-pre"
+                                  spellCheck={false}
+                                />
+                              </div>
+                            ) : (
+                              <div className="flex-1 flex flex-col overflow-hidden relative">
+                                <InteractiveChordViewer
+                                  text={lyricsEditValue}
+                                  instrument={selectedInstrument}
+                                  onChordClick={(chordName, notes) => {
+                                    setActivePianoNotes(notes);
+                                  }}
+                                  className="flex-1 h-full"
+                                />
+                              </div>
+                            )}
+                          </div>
+
+                          {/* 하단: 코드 듣기 모드일 때 등장하는 가상 피아노 건반 */}
+                          <AnimatePresence>
+                            {chordViewMode === 'play' && showVirtualPiano && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.15 }}
+                                className="border-t border-[#3E3C38] shrink-0"
+                              >
+                                <VirtualPiano
+                                  activeNotes={activePianoNotes}
+                                  instrument={selectedInstrument}
+                                  onKeyClick={(noteName) => {
+                                    console.log('[VirtualPiano] Key pressed:', noteName);
+                                  }}
+                                />
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </>
+                      ) : (
+                        <SongFormBuilder
+                          title={selectedSong?.title || '찬양 곡'}
+                          songKey={selectedSong?.code || 'C'}
+                          meter={selectedSong?.meter || '4/4'}
+                          rhythm={selectedSong?.rhythm || ''}
+                          bpm={selectedSong?.bpm || 72}
+                          initialText={selectedSong?.songFormText || selectedSong?.performanceMemo || ''}
+                          initialBlocks={selectedSong?.songFormBlocks}
+                          initialSongFormText={selectedSong?.songForm}
+                          isSaving={isSavingSongForm}
+                          onSave={async (data) => {
+                            if (!selectedSongId || !selectedSong) return;
+                            setIsSavingSongForm(true);
+                            try {
+                              const updatedFields = {
+                                songForm: data.textSummary,
+                                songFormBlocks: data.blocks,
+                                code: data.code || selectedSong.code,
+                                meter: data.meter || selectedSong.meter,
+                                rhythm: data.rhythm || selectedSong.rhythm,
+                                bpm: data.bpm || selectedSong.bpm,
+                                songFormText: data.songFormText,
+                                performanceMemo: data.songFormText,
+                              };
+                              setSongs(prev => prev.map(s => s.id === selectedSongId ? { ...s, ...updatedFields } : s));
+                              await hymnalApi.updateSong({
+                                id: selectedSongId,
+                                ...updatedFields,
+                              });
+                            } catch (err) {
+                              console.error('[HymnalModule] 송폼 저장 오류:', err);
+                            } finally {
+                              setIsSavingSongForm(false);
+                            }
+                          }}
+                          onLaunchPrompter={(data) => {
+                            setPrompterBlocks(data.blocks);
+                            setShowPrompter(true);
+                          }}
+                        />
+                      )}
                     </div>
-                  </div>
+                  )}
                 </div>
 
                 {/* 2. Youtube Player Side Panel (악보패널 옆에 나란히 flex 아이템으로 배치되어 악보패널을 밀어냄, 드래그 크기 조절 가능) */}
@@ -1080,56 +1589,43 @@ export const HymnalModule: React.FC = () => {
                         <div className="w-0.5 h-8 bg-[#D0CDC7] group-hover:bg-[#8C877D] group-hover:h-12 group-active:bg-[#5C5953] rounded-full transition-all" />
                       </div>
 
-                      <div className="w-full flex flex-col h-full overflow-hidden">
-                        {/* 패널 헤더 (유튜브창 위 코드텍스트 글카드 삭제) */}
+                      <div className="w-full flex flex-col h-full overflow-hidden bg-white">
+                        {/* 1. 패널 헤더 */}
                         <div className="p-3 border-b border-[#E7E5DF] flex items-center justify-between bg-[#FAF9F5] shrink-0">
                           <div className="flex items-center gap-2">
                              <Youtube className="w-4 h-4 text-[#C96442]" />
-                             <span className="font-serif text-xs font-bold text-[#2C2B29]">찬양 영상 라이브러리</span>
+                             <span className="font-serif text-xs font-bold text-[#2C2B29]">찬양 영상 & 라이브러리</span>
                              {selectedSong.youtubeVideos && selectedSong.youtubeVideos.length > 0 && (
                                <span className="px-1.5 py-0.5 bg-[#FAF0EB] text-[#C96442] rounded-md text-[10px] font-bold">
-                                 {selectedSong.youtubeVideos.length}개
+                                 보관 {selectedSong.youtubeVideos.length}개
                                </span>
                              )}
                           </div>
                           <button 
-                            onClick={() => {
-                              setShowYoutubePlayer(false);
-                              setShowCodeText(false);
-                            }} 
+                            onClick={() => setShowYoutubePlayer(false)} 
                             className="p-1 hover:bg-[#F5F3ED] rounded-lg cursor-pointer transition-colors"
-                            title="패널 닫기"
+                            title="유튜브 창 닫기"
                           >
                             <X className="w-4 h-4 text-[#A3A19B] hover:text-[#2C2B29] stroke-[1.8px]" />
                           </button>
                         </div>
 
-                        {/* Video Playlist Tabs (영상 2개 이상일 때) */}
-                        {selectedSong.youtubeVideos && selectedSong.youtubeVideos.length > 1 && (
-                          <div className="px-3 py-2 bg-[#FAF9F5] border-b border-[#E7E5DF] flex items-center gap-1.5 overflow-x-auto custom-scrollbar shrink-0">
-                            {selectedSong.youtubeVideos.map((video, idx) => (
-                              <button 
-                                key={idx}
-                                onClick={() => setActiveVideoIndex(idx)}
-                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all shrink-0 border cursor-pointer ${
-                                  activeVideoIndex === idx 
-                                    ? 'bg-[#FAF0EB] text-[#C96442] border-[#F1D3C6] font-bold shadow-2xs' 
-                                    : 'bg-white text-[#6A6864] border-[#E7E5DF] hover:border-[#DDD9D0]'
-                                }`}
-                              >
-                                <span className={`w-4 h-4 rounded text-[9px] flex items-center justify-center font-bold ${
-                                  activeVideoIndex === idx ? 'bg-[#C96442] text-white' : 'bg-[#F5F3ED] text-[#8C877D]'
-                                }`}>
-                                  {idx + 1}
-                                </span>
-                                <span className="truncate max-w-[130px]">{video.name || `영상 ${idx + 1}`}</span>
-                              </button>
-                            ))}
+                        {/* 2. 상단 플레이어 (미리보기 재생 또는 저장된 라이브러리 영상 재생) */}
+                        {activePreviewVideoId ? (
+                          <div className="bg-[#1C1A18] flex items-center justify-center overflow-hidden w-full aspect-video shrink-0 shadow-inner relative">
+                            <iframe 
+                              key={activePreviewVideoId}
+                              width="100%" 
+                              height="100%" 
+                              src={`https://www.youtube.com/embed/${activePreviewVideoId}?enablejsapi=1&autoplay=1`}
+                              title="YouTube video player" 
+                              frameBorder="0" 
+                              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+                              allowFullScreen
+                              className="w-full h-full aspect-video"
+                            />
                           </div>
-                        )}
-
-                        {/* Player Container */}
-                        {selectedSong.youtubeVideos && selectedSong.youtubeVideos.length > 0 ? (
+                        ) : selectedSong.youtubeVideos && selectedSong.youtubeVideos.length > 0 ? (
                           <div className="bg-[#1C1A18] flex items-center justify-center overflow-hidden w-full aspect-video shrink-0 shadow-inner">
                             {selectedSong.youtubeVideos[activeVideoIndex]?.url && getYoutubeEmbedUrl(selectedSong.youtubeVideos[activeVideoIndex].url) ? (
                               <iframe 
@@ -1142,7 +1638,7 @@ export const HymnalModule: React.FC = () => {
                                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
                                 allowFullScreen
                                 className="w-full h-full aspect-video"
-                              ></iframe>
+                              />
                             ) : (
                               <div className="text-center p-6">
                                 <p className="text-xs font-medium text-[#A3A19B]">올바른 유튜브 링크가 아닙니다.</p>
@@ -1150,127 +1646,303 @@ export const HymnalModule: React.FC = () => {
                             )}
                           </div>
                         ) : (
-                          <div className="p-3 bg-[#FAF9F5] border-b border-[#E7E5DF] flex items-center justify-between text-xs text-[#8C877D] shrink-0">
-                            <div className="flex items-center gap-1.5">
-                              <Youtube className="w-4 h-4 text-[#A3A19B]" />
-                              <span>등록된 유튜브 영상이 없습니다.</span>
+                          <div className="bg-[#1C1A18] aspect-video flex flex-col items-center justify-center p-6 text-center shrink-0">
+                            <Youtube className="w-8 h-8 text-[#5C5953] mb-2 stroke-[1.5px]" />
+                            <p className="text-xs font-medium text-[#A3A19B]">선택된 찬양 영상이 없습니다.</p>
+                            <p className="text-[11px] text-[#706E6B] mt-1">아래 검색 결과에서 [▶ 바로재생]을 눌러보세요.</p>
+                          </div>
+                        )}
+
+                        {/* 3. 미리보기 중일 때 라이브러리 추가 유도 알림바 */}
+                        {activePreviewVideoId && (
+                          <div className="px-3 py-2 bg-[#FAF0EB] border-b border-[#F1D3C6] flex items-center justify-between gap-2 shrink-0 animate-in fade-in duration-200">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <Play className="w-3.5 h-3.5 text-[#C96442] shrink-0 fill-[#C96442]" />
+                              <span className="text-[11px] font-bold text-[#C96442] shrink-0">재생 중:</span>
+                              <span className="text-[11px] text-[#2C2B29] font-medium truncate">
+                                {youtubeSearchResults.find(r => r.videoId === activePreviewVideoId)?.title || '유튜브 영상'}
+                              </span>
                             </div>
-                            <button 
-                              onClick={startEditing}
-                              className="text-[11px] text-[#C96442] hover:underline font-semibold cursor-pointer"
+                            <div className="flex items-center gap-1 shrink-0">
+                              {(() => {
+                                const previewItem = youtubeSearchResults.find(r => r.videoId === activePreviewVideoId);
+                                const isAlreadySaved = selectedSong.youtubeVideos?.some(v => v.url?.includes(activePreviewVideoId));
+                                if (isAlreadySaved) {
+                                  return (
+                                    <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-white px-2 py-0.5 rounded border border-emerald-200">
+                                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                      담김
+                                    </span>
+                                  );
+                                }
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (previewItem) {
+                                        handleAddVideoToLibrary({ videoId: previewItem.videoId, title: previewItem.title });
+                                      }
+                                    }}
+                                    className="flex items-center gap-1 text-[10px] font-bold text-white bg-[#C96442] hover:bg-[#B55434] px-2 py-1 rounded-md transition-all shadow-2xs cursor-pointer active:scale-95"
+                                  >
+                                    <BookmarkPlus className="w-3 h-3" />
+                                    <span>라이브러리에 담기</span>
+                                  </button>
+                                );
+                              })()}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 4. 유튜브 검색창 */}
+                        <div className="p-3 bg-[#FAF9F5] border-b border-[#E7E5DF] shrink-0">
+                          <form 
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              handleSearchYoutube();
+                            }}
+                            className="flex items-center gap-1.5"
+                          >
+                            <div className="relative flex-1">
+                              <Search className="w-3.5 h-3.5 text-[#8C877D] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                              <input
+                                type="text"
+                                value={youtubeSearchQuery}
+                                onChange={(e) => setYoutubeSearchQuery(e.target.value)}
+                                placeholder="유튜브 찬양 영상 검색..."
+                                className="w-full pl-8 pr-3 py-1.5 bg-white border border-[#DDD9D0] rounded-xl text-xs text-[#2C2B29] placeholder-[#A3A19B] focus:outline-none focus:border-[#C96442] focus:ring-1 focus:ring-[#C96442]/20"
+                              />
+                            </div>
+                            <button
+                              type="submit"
+                              disabled={isSearchingYoutube}
+                              className="flex items-center gap-1 px-3 py-1.5 bg-[#C96442] hover:bg-[#B55434] disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-2xs cursor-pointer shrink-0"
                             >
-                              영상 추가
+                              {isSearchingYoutube ? (
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <span>검색</span>
+                              )}
+                            </button>
+                          </form>
+                        </div>
+
+                        {/* 5. 탭 헤더: [유튜브 검색 결과] vs [저장된 영상 목록] */}
+                        <div className="px-3 pt-2 bg-[#FAF9F5] border-b border-[#E7E5DF] flex items-center justify-between gap-2 shrink-0">
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setYoutubeTab('search')}
+                              className={`px-3 py-1.5 text-xs font-bold rounded-t-lg transition-all border-b-2 cursor-pointer flex items-center gap-1.5 ${
+                                youtubeTab === 'search'
+                                  ? 'text-[#C96442] border-[#C96442] bg-white shadow-2xs'
+                                  : 'text-[#6A6864] border-transparent hover:text-[#2C2B29]'
+                              }`}
+                            >
+                              <span>유튜브 검색 결과</span>
+                              {youtubeSearchResults.length > 0 && (
+                                <span className="px-1.5 py-0.2 bg-[#FAF0EB] text-[#C96442] rounded-full text-[10px]">
+                                  {youtubeSearchResults.length}
+                                </span>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setYoutubeTab('library')}
+                              className={`px-3 py-1.5 text-xs font-bold rounded-t-lg transition-all border-b-2 cursor-pointer flex items-center gap-1.5 ${
+                                youtubeTab === 'library'
+                                  ? 'text-[#C96442] border-[#C96442] bg-white shadow-2xs'
+                                  : 'text-[#6A6864] border-transparent hover:text-[#2C2B29]'
+                              }`}
+                            >
+                              <span>저장된 영상 목록</span>
+                              {selectedSong.youtubeVideos && selectedSong.youtubeVideos.length > 0 && (
+                                <span className="px-1.5 py-0.2 bg-[#FAF0EB] text-[#C96442] rounded-full text-[10px]">
+                                  {selectedSong.youtubeVideos.length}
+                                </span>
+                              )}
                             </button>
                           </div>
-                        )}
-                        
-                        {/* 3. 코드 텍스트는 버튼을 눌렀을 때 유튜브 아래 칸이 뜸 (수정 가능 + 저장 버튼 포함) */}
-                        <AnimatePresence>
-                          {showCodeText && (
-                            <motion.div 
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.2 }}
-                              className="flex-1 flex flex-col p-3 bg-[#FAF9F5] min-h-[220px] overflow-hidden border-t border-[#E7E5DF]"
-                            >
-                              <div className="flex-1 flex flex-col bg-white border border-[#E7E5DF] rounded-2xl overflow-hidden shadow-2xs">
-                                {/* 네모칸 상단 바: 박자 삭제, KEY만 유지, [저장] 버튼 추가 */}
-                                <div className="px-3.5 py-2 bg-[#FAF9F5] border-b border-[#E7E5DF] flex items-center justify-between shrink-0">
-                                  <div className="flex items-center gap-2">
-                                    <FileText className="w-3.5 h-3.5 text-[#C96442]" />
-                                    <span className="text-xs font-bold text-[#2C2B29]">코드 & 가사 편집</span>
-                                    {selectedSong?.code && (
-                                      <span className="px-1.5 py-0.5 bg-[#FAF0EB] text-[#C96442] rounded text-[10px] font-bold border border-[#F1D3C6]">
-                                        {selectedSong.code} KEY
-                                      </span>
-                                    )}
-                                  </div>
 
-                                  <div className="flex items-center gap-1.5">
-                                    {/* 가사/코드 저장 버튼 */}
-                                    <button
-                                      onClick={handleSaveLyrics}
-                                      disabled={isSavingLyrics}
-                                      className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer shadow-2xs ${
-                                        lyricsSavedNotice
-                                          ? 'bg-emerald-600 text-white'
-                                          : 'bg-[#C96442] hover:bg-[#B55434] text-white active:scale-95'
-                                      }`}
-                                      title="가사 및 코드 변경사항 저장"
-                                    >
-                                      {lyricsSavedNotice ? (
-                                        <>
-                                          <Check className="w-3 h-3 stroke-[2.5px]" />
-                                          <span className="text-[11px]">저장됨</span>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <Save className="w-3 h-3 stroke-[2px]" />
-                                          <span className="text-[11px]">{isSavingLyrics ? '저장중' : '저장'}</span>
-                                        </>
-                                      )}
-                                    </button>
-
-                                    {/* 텍스트 복사 버튼 */}
-                                    <button
-                                      onClick={() => {
-                                        if (lyricsEditValue) {
-                                          navigator.clipboard.writeText(lyricsEditValue);
-                                          setCopiedLyrics(true);
-                                          setTimeout(() => setCopiedLyrics(false), 2000);
-                                        }
-                                      }}
-                                      disabled={!lyricsEditValue}
-                                      className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-[#6A6864] hover:text-[#C96442] hover:bg-[#FAF0EB] rounded-lg transition-colors cursor-pointer disabled:opacity-40"
-                                      title="코드 및 가사 텍스트 복사"
-                                    >
-                                      {copiedLyrics ? (
-                                        <>
-                                          <Check className="w-3 h-3 text-emerald-600" />
-                                          <span className="text-emerald-600 font-bold text-[11px]">복사됨</span>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <Copy className="w-3 h-3" />
-                                          <span className="text-[11px]">복사</span>
-                                        </>
-                                      )}
-                                    </button>
-
-                                    {/* 닫기 버튼 */}
-                                    <button
-                                      onClick={() => setShowCodeText(false)}
-                                      className="p-1 hover:bg-[#F5F3ED] rounded-lg text-[#A3A19B] hover:text-[#2C2B29] transition-colors cursor-pointer"
-                                      title="코드 칸 접기"
-                                    >
-                                      <X className="w-3.5 h-3.5 stroke-[1.8px]" />
-                                    </button>
-                                  </div>
-                                </div>
-
-                                {/* 네모칸 본문: 가사/코드를 직접 수정할 수 있는 textarea */}
-                                <div className="flex-1 p-2 bg-white flex flex-col min-h-0 overflow-hidden">
-                                  <textarea
-                                    value={lyricsEditValue}
-                                    onChange={(e) => setLyricsEditValue(e.target.value)}
-                                    placeholder="가사 및 코드를 입력하고 상단의 [저장] 버튼을 누르세요..."
-                                    className="flex-1 w-full p-2.5 font-mono text-xs text-[#2C2B29] leading-relaxed resize-none border border-[#E7E5DF] rounded-xl focus:outline-none focus:border-[#C96442] focus:ring-1 focus:ring-[#C96442]/20 custom-scrollbar bg-white"
-                                    spellCheck={false}
-                                  />
-                                </div>
-                              </div>
-                            </motion.div>
+                          {videoAddedNotice && (
+                            <span className="text-[11px] font-bold text-emerald-600 animate-in fade-in flex items-center gap-1">
+                              <Check className="w-3 h-3 stroke-[2.5px]" />
+                              추가 완료!
+                            </span>
                           )}
-                        </AnimatePresence>
+                        </div>
 
-                        {/* showCodeText가 false일 때 심플한 영상 정보 (안내 카드 완전 삭제) */}
-                        {!showCodeText && (
-                          <div className="p-3 bg-[#FAF9F5] flex-1 overflow-y-auto">
-                            <p className="text-[10px] font-bold text-[#A3A19B] uppercase tracking-wider mb-1">현재 재생 중</p>
-                            <p className="text-xs font-semibold text-[#2C2B29] truncate">{selectedSong.youtubeVideos?.[activeVideoIndex]?.name || selectedSong.title}</p>
-                          </div>
-                        )}
+                        {/* 6. 탭 본문 (스크롤 리스트) */}
+                        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 bg-[#FAF9F5]/50">
+                          {youtubeTab === 'search' ? (
+                            <div className="space-y-2.5">
+                              {isSearchingYoutube ? (
+                                <div className="py-12 flex flex-col items-center justify-center text-center">
+                                  <RefreshCw className="w-6 h-6 text-[#C96442] animate-spin mb-3" />
+                                  <p className="text-xs font-bold text-[#2C2B29]">유튜브에서 찬양 영상을 검색하고 있습니다...</p>
+                                  <p className="text-[11px] text-[#8C877D] mt-1">별도의 API 키 없이 실시간으로 결과를 불러옵니다.</p>
+                                </div>
+                              ) : youtubeSearchResults.length === 0 ? (
+                                <div className="py-12 flex flex-col items-center justify-center text-center px-4">
+                                  <Search className="w-7 h-7 text-[#A3A19B] mb-2 stroke-[1.5px]" />
+                                  <p className="text-xs font-bold text-[#2C2B29]">검색 결과가 없습니다.</p>
+                                  <p className="text-[11px] text-[#8C877D] mt-1">상단 검색창에 곡명이나 찬양팀 이름을 입력하고 검색해보세요.</p>
+                                </div>
+                              ) : (
+                                youtubeSearchResults.map((item) => {
+                                  const isPlaying = activePreviewVideoId === item.videoId;
+                                  const isAlreadySaved = selectedSong.youtubeVideos?.some(v => v.url?.includes(item.videoId));
+
+                                  return (
+                                    <div
+                                      key={item.videoId}
+                                      className={`p-2.5 bg-white border rounded-xl transition-all shadow-2xs hover:shadow-sm flex gap-3 group ${
+                                        isPlaying ? 'border-[#C96442] ring-1 ring-[#C96442]/30 bg-[#FFFDFB]' : 'border-[#E7E5DF] hover:border-[#DDD9D0]'
+                                      }`}
+                                    >
+                                      {/* 좌측: 썸네일 */}
+                                      <div 
+                                        onClick={() => setActivePreviewVideoId(item.videoId)}
+                                        className="relative w-28 aspect-video rounded-lg overflow-hidden shrink-0 bg-black cursor-pointer group/thumb"
+                                      >
+                                        <img 
+                                          src={item.thumbnailUrl || item.thumbnail || `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`} 
+                                          alt={item.title} 
+                                          className="w-full h-full object-cover group-hover/thumb:scale-105 transition-transform duration-300" 
+                                          loading="lazy" 
+                                        />
+                                        {item.duration && (
+                                          <span className="absolute bottom-1 right-1 px-1 py-0.2 bg-black/80 text-white text-[9px] font-mono rounded">
+                                            {item.duration}
+                                          </span>
+                                        )}
+                                        <div className="absolute inset-0 bg-black/20 group-hover/thumb:bg-black/40 flex items-center justify-center transition-colors">
+                                          <Play className={`w-5 h-5 transition-transform ${isPlaying ? 'text-[#C96442] scale-110 fill-[#C96442]' : 'text-white opacity-80 group-hover/thumb:opacity-100 group-hover/thumb:scale-110'}`} />
+                                        </div>
+                                      </div>
+
+                                      {/* 중앙 & 우측: 정보 및 액션 버튼 */}
+                                      <div className="flex-1 flex flex-col justify-between min-w-0">
+                                        <div>
+                                          <p 
+                                            onClick={() => setActivePreviewVideoId(item.videoId)}
+                                            className="text-xs font-bold text-[#2C2B29] line-clamp-2 hover:text-[#C96442] cursor-pointer transition-colors leading-snug"
+                                            title={item.title}
+                                          >
+                                            {item.title}
+                                          </p>
+                                          <p className="text-[10px] text-[#8C877D] mt-0.5 truncate">{item.channelTitle}</p>
+                                        </div>
+
+                                        <div className="flex items-center justify-between gap-1 mt-2 pt-1.5 border-t border-[#F5F3ED]">
+                                          {/* 바로재생 버튼 */}
+                                          <button
+                                            type="button"
+                                            onClick={() => setActivePreviewVideoId(item.videoId)}
+                                            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                                              isPlaying 
+                                                ? 'bg-[#C96442] text-white shadow-2xs' 
+                                                : 'text-[#6A6864] hover:text-[#2C2B29] hover:bg-[#FAF9F5]'
+                                            }`}
+                                          >
+                                            <Play className={`w-3 h-3 ${isPlaying ? 'fill-white' : ''}`} />
+                                            <span>{isPlaying ? '재생중' : '바로재생'}</span>
+                                          </button>
+
+                                          {/* 라이브러리 추가 버튼 */}
+                                          {isAlreadySaved ? (
+                                            <span className="flex items-center gap-1 text-[10px] font-medium text-white bg-[#1E1E1E] px-2 py-0.5 rounded shadow-2xs">
+                                              <Check className="w-2.5 h-2.5 stroke-[2.5px] text-white" />
+                                              담김
+                                            </span>
+                                          ) : (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleAddVideoToLibrary({ videoId: item.videoId, title: item.title })}
+                                              className="flex items-center gap-1 px-2.5 py-0.5 bg-[#FAF0EB] hover:bg-[#F3DDD2] text-[#C96442] font-bold rounded text-[10px] border border-[#F1D3C6] transition-all cursor-pointer shadow-2xs active:scale-95"
+                                              title="이 곡의 찬양 영상 목록에 추가"
+                                            >
+                                              <Plus className="w-3 h-3 stroke-[2.5px]" />
+                                              <span>라이브러리에 담기</span>
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              {!selectedSong.youtubeVideos || selectedSong.youtubeVideos.length === 0 ? (
+                                <div className="py-12 flex flex-col items-center justify-center text-center px-4">
+                                  <Youtube className="w-7 h-7 text-[#A3A19B] mb-2 stroke-[1.5px]" />
+                                  <p className="text-xs font-bold text-[#2C2B29]">저장된 찬양 영상이 없습니다.</p>
+                                  <p className="text-[11px] text-[#8C877D] mt-1">[유튜브 검색 결과] 탭에서 원하는 영상을 찾아 [+ 담기] 버튼을 눌러보세요.</p>
+                                </div>
+                              ) : (
+                                selectedSong.youtubeVideos.map((video, idx) => {
+                                  const isCurrentActive = !activePreviewVideoId && activeVideoIndex === idx;
+                                  return (
+                                    <div
+                                      key={idx}
+                                      className={`p-2.5 bg-white border rounded-xl flex items-center justify-between gap-3 transition-all shadow-2xs ${
+                                        isCurrentActive ? 'border-[#C96442] ring-1 ring-[#C96442]/30 bg-[#FFFDFB]' : 'border-[#E7E5DF] hover:border-[#DDD9D0]'
+                                      }`}
+                                    >
+                                      <div 
+                                        onClick={() => {
+                                          setActivePreviewVideoId(null);
+                                          setActiveVideoIndex(idx);
+                                        }}
+                                        className="flex items-center gap-2.5 flex-1 min-w-0 cursor-pointer"
+                                      >
+                                        <div className={`w-6 h-6 rounded-lg flex items-center justify-center font-bold text-[10px] shrink-0 ${
+                                          isCurrentActive ? 'bg-[#C96442] text-white' : 'bg-[#FAF9F5] text-[#8C877D] border border-[#E7E5DF]'
+                                        }`}>
+                                          {idx + 1}
+                                        </div>
+                                        <div className="min-w-0 flex-1">
+                                          <p className={`text-xs font-bold truncate ${isCurrentActive ? 'text-[#C96442]' : 'text-[#2C2B29]'}`}>
+                                            {video.name || `찬양 영상 ${idx + 1}`}
+                                          </p>
+                                          <p className="text-[10px] text-[#A3A19B] truncate font-mono mt-0.5">{video.url}</p>
+                                        </div>
+                                      </div>
+
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setActivePreviewVideoId(null);
+                                            setActiveVideoIndex(idx);
+                                          }}
+                                          className={`p-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                            isCurrentActive 
+                                              ? 'bg-[#FAF0EB] text-[#C96442]' 
+                                              : 'text-[#6A6864] hover:bg-[#FAF9F5] hover:text-[#2C2B29]'
+                                          }`}
+                                          title="이 영상 재생"
+                                        >
+                                          <Play className={`w-3.5 h-3.5 ${isCurrentActive ? 'fill-[#C96442]' : ''}`} />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRemoveVideoFromLibrary(idx)}
+                                          className="p-1.5 hover:bg-rose-50 text-[#A3A19B] hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
+                                          title="라이브러리에서 제거"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5 stroke-[1.8px]" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </motion.div>
                   )}
@@ -1412,7 +2084,32 @@ export const HymnalModule: React.FC = () => {
         onDelete={deleteSavedConti}
       />
 
+      {/* 12반음 체계 코드 조합기 모달 */}
+      <ChordBuilderModal
+        isOpen={showChordBuilder}
+        onClose={() => setShowChordBuilder(false)}
+        instrument={selectedInstrument}
+        onInsertChord={handleInsertChordFromBuilder}
+        onChordSelect={(notes) => setActivePianoNotes(notes)}
+      />
+
+      {/* 실전 무대용 라이브 프롬프터 모달 */}
+      {showPrompter && (
+        <LiveStagePrompter
+          title={selectedSong?.title || '찬양'}
+          songKey={selectedSong?.code || 'C'}
+          meter={selectedSong?.meter || '4/4'}
+          rhythm={selectedSong?.rhythm || ''}
+          performanceMemo={selectedSong?.performanceMemo || ''}
+          instrumentMemo={selectedSong?.instrumentMemo || ''}
+          songFormText={selectedSong?.songFormText || selectedSong?.performanceMemo || ''}
+          bpm={selectedSong?.bpm || 72}
+          blocks={prompterBlocks.length > 0 ? prompterBlocks : (selectedSong?.songFormBlocks || [])}
+          onClose={() => setShowPrompter(false)}
+        />
+      )}
 
     </div>
   );
 };
+

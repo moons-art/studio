@@ -57,7 +57,7 @@ export async function uploadSheetImageToR2(
         }
       });
       const timeoutStorage = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('Storage timeout')), 4000)
+        setTimeout(() => reject(new Error('Storage timeout')), 10000)
       );
       
       await Promise.race([storagePromise, timeoutStorage]);
@@ -153,14 +153,18 @@ export async function deleteSheetImage(storageUrlOrPath?: string): Promise<boole
   // 1. Firebase Storage 삭제 시도
   try {
     const { getStorage, ref, deleteObject } = await import('firebase/storage');
-    const storage = getStorage();
+    const storage = getStorage(app);
     
     let storageRef;
     if (storageUrlOrPath.startsWith('http://') || storageUrlOrPath.startsWith('https://')) {
-      if (storageUrlOrPath.includes('firebasestorage.googleapis.com')) {
+      if (
+        storageUrlOrPath.includes('firebasestorage.googleapis.com') ||
+        storageUrlOrPath.includes('firebasestorage.app') ||
+        storageUrlOrPath.includes('storage.googleapis.com')
+      ) {
         storageRef = ref(storage, storageUrlOrPath);
       }
-    } else if (storageUrlOrPath.startsWith('sheets/')) {
+    } else if (storageUrlOrPath.startsWith('gs://') || storageUrlOrPath.startsWith('sheets/')) {
       storageRef = ref(storage, storageUrlOrPath);
     }
 

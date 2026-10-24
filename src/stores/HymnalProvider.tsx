@@ -385,11 +385,25 @@ export const HymnalProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const deleteAlbum = async (id: string) => {
     if (!(await ensureAuth())) return;
     
-    // 1. 로컬 상태 즉시 제거 (삭제 버그 원천 해결 및 0.1초 즉시 삭제)
+    // 1. 해당 앨범에 속한 곡들 확인 및 로컬 곡 목록 즉시 제거
+    const albumSongs = songs.filter(s => s.albumId === id);
+    if (albumSongs.length > 0) {
+      setSongs(prev => prev.filter(s => s.albumId !== id));
+      // 백그라운드에서 해당 곡들의 원본 이미지(Storage), IndexedDB, Firestore 완전 삭제
+      for (const song of albumSongs) {
+        const targetFileId = (song as any)?.fileId;
+        const targetStorageUrl = (song as any)?.storageUrl || (song as any)?.filePath;
+        hymnalApi.deleteSong(song.id, true, targetFileId, targetStorageUrl).catch(e => {
+          console.warn('[HymnalProvider] deleteAlbum song delete failed:', e);
+        });
+      }
+    }
+
+    // 2. 로컬 앨범 상태 즉시 제거
     setAlbums(prev => prev.filter(a => a.id !== id));
     setActiveAlbumId('all');
 
-    // 2. 백그라운드 구글 드라이브 설정 저장 및 스캔
+    // 3. 백그라운드 앨범 설정 저장 및 스캔
     hymnalApi.deleteAlbum(id).then(async (result) => {
       if (result.success) {
         await fetchSongs(); // 곡 목록 실시간 스캔 동기화

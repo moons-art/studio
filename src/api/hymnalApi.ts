@@ -474,14 +474,12 @@ export const hymnalApi = {
     files: File[],
     albumName: string,
     onProgress: (processed: number, total: number) => void,
-    albumId?: string,
-    enableAiAnalysis: boolean = false
+    albumId?: string
   ) => {
     const { compressImageToWebP, uploadImageToR2 } = await import('../utils/imageProcessor');
-    const { analyzeScoreImage, formatScoreSectionsToText } = await import('./aiScoreService');
     const uploadedSongs: any[] = [];
     let processedCount = 0;
-    const CHUNK_SIZE = enableAiAnalysis ? 2 : 4;
+    const CHUNK_SIZE = 4;
     const finalAlbumId = albumId || (albumName === '새찬송가' ? 'hymnal' : (albumName === '미분류' ? 'misc' : albumName));
 
     for (let i = 0; i < files.length; i += CHUNK_SIZE) {
@@ -503,7 +501,7 @@ export const hymnalApi = {
           const { imageCache } = await import('../utils/imageCache');
           await imageCache.saveImage(songId, compressedBlob);
 
-          // 2. Cloudflare R2 / 원격 스토리지 업로드 시도 (원격 URL 확보 시 연동)
+          // 2. Firebase Storage / 원격 스토리지 업로드 시도 (원격 URL 확보 시 연동)
           let finalStorageUrl = songId;
           try {
             const { storageUrl } = await uploadImageToR2(compressedBlob, {
@@ -521,58 +519,24 @@ export const hymnalApi = {
           const numMatch = fileName.match(/\d+/);
           const number = numMatch ? parseInt(numMatch[0], 10) : uploadedSongs.length + 1;
 
-          // 3. AI 악보정보 분석
-          let songTitle = fileName;
-          let songCode = '';
-          let songMeter = '';
-          let songCategory = '';
-          let songForm = '';
-          let songLyrics = '';
           const searchTokens: string[] = [fileName];
-
-          if (enableAiAnalysis) {
-            try {
-              const aiResult = await analyzeScoreImage(compressedBlob);
-              if (aiResult && aiResult.isSheetMusic) {
-                if (aiResult.title) {
-                  songTitle = aiResult.title.trim();
-                  searchTokens.push(songTitle);
-                }
-                if (aiResult.keySignature) {
-                  songCode = aiResult.keySignature.replace(/Major|Minor|장조|단조/gi, '').trim() || aiResult.keySignature.trim();
-                }
-                if (aiResult.timeSignature) songMeter = aiResult.timeSignature.trim();
-                if (aiResult.theme) songCategory = aiResult.theme.trim();
-                if (aiResult.structure) songForm = aiResult.structure.trim();
-                if (aiResult.sections && aiResult.sections.length > 0) {
-                  songLyrics = formatScoreSectionsToText(aiResult.sections);
-                } else if (aiResult.firstLyric) {
-                  songLyrics = aiResult.firstLyric;
-                }
-                if (aiResult.firstLyric) searchTokens.push(aiResult.firstLyric);
-                if (aiResult.artistOrComposer) searchTokens.push(aiResult.artistOrComposer);
-              }
-            } catch (aiErr) {
-              console.warn(`[hymnalApi] AI score analysis skipped for ${file.name}:`, aiErr);
-            }
-          }
 
           const newSong = {
             id: songId,
-            title: songTitle,
+            title: fileName,
             number: number,
             albumId: finalAlbumId,
             type: 'image',
             filePath: finalStorageUrl,
             storageUrl: finalStorageUrl,
             fileId: songId, // imageCache 고속 조회 키
-            fileSize: compressedBlob.size, // 실제 WebP 파일 바이트 크기 (R2 / 로컬 실측)
-            code: songCode || '',
-            meter: songMeter || '',
-            category: songCategory || '',
-            songForm: songForm || '',
-            lyrics: songLyrics || '',
-            isManual: enableAiAnalysis ? true : false,
+            fileSize: compressedBlob.size, // 실제 WebP 파일 바이트 크기
+            code: '',
+            meter: '',
+            category: '',
+            songForm: '',
+            lyrics: '',
+            isManual: false,
             searchTokens
           };
 
@@ -594,10 +558,9 @@ export const hymnalApi = {
    */
   uploadSingleImagesToGDrive: async (
     files: File[],
-    onProgress: (processed: number, total: number) => void,
-    enableAiAnalysis: boolean = false
+    onProgress: (processed: number, total: number) => void
   ) => {
-    return hymnalApi.batchUploadImagesToGDrive(files, '미분류', onProgress, 'misc', enableAiAnalysis);
+    return hymnalApi.batchUploadImagesToGDrive(files, '미분류', onProgress, 'misc');
   },
 
   /**

@@ -120,9 +120,12 @@ const SCORE_ANALYSIS_SYSTEM_PROMPT = `당신은 최고 수준의 시각 악보 �
 
 ---
 
-### [규칙 3: 손글씨/펜글씨 악보 및 음악 늘임표('-') 정제]
+### [규칙 3: 박자 싱크를 위한 음절 하이픈('-') 및 마디 호흡 정제]
 1. 펜글씨, 흘림체, 손글씨 악보의 음표 아래 적힌 한글 자모를 문맥과 함께 정밀 해독하세요.
-2. 악보 특성상 음표 길이나 멜리스마 때문에 음절 사이에 들어간 하이픈('-')과 부자연스러운 글자 띄어쓰기는 음악적 기호이므로, 하이픈을 모두 제거하고 일상적인 자연스러운 표준 한국어 문장으로 결합하세요.
+2. **코드와 가사의 수직 싱크를 맞추기 위한 핵심 지침**:
+   - 악보에서 한 마디 안의 음표 박자가 길거나(2분음표, 온음표, 붙임줄 등), 쉼표가 있거나, 가사 글자 수가 적어 코드가 뒤로 밀릴 때:
+   - 가사 음절 사이에 **'-'**(하이픈)이나 음절 간격을 적절히 넣어(예: '나-가리', '예 - - - 수', '오 - 주님', '내가- 정금 같 - 이 - 나아오 리 라') 각 박자의 연주 길이를 표현하고, 코드가 해당 음절 바로 위에 1:1 수직으로 정확히 일치하도록 맞추세요.
+   - 단, 박자 연장이 없는 일반적인 음절은 자연스러운 한국어 어절로 띄어쓰기를 유지하세요.
 
 ---
 
@@ -137,8 +140,8 @@ const SCORE_ANALYSIS_SYSTEM_PROMPT = `당신은 최고 수준의 시각 악보 �
 - "sections": 섹션 배열 (예: [Verse], [Chorus])
   * "sectionName": 섹션명 (예: "[Verse]", "[Chorus]")
   * "lines": 해당 섹션의 가사 라인 배열
-    - "fullLyrics": 자연스러운 완성형 한국어 가사 1줄
-    - "chordLineText": 모노스페이스(고정폭) 폰트에서 가사 윗줄에 표시할 수 있도록, 글자 위치에 공백을 맞춰 배치한 코드 문자열
+    - "fullLyrics": 박자 연장 하이픈('-')이 반영된 악보 기준 가사 1줄 (예: "주가 보이신 생명의 길 나 주님과 함께", "상한 맘을 드리며 주님 앞에 나-가리")
+    - "chordLineText": CJK 모노스페이스(한글 1글자 = 공백 2칸) 기준, 아랫줄의 해당 가사 음절 바로 위에 코드가 수직으로 칼같이 일치하도록 공백을 맞춘 코드 줄 문자열
     - "segments": 어절/단어 단위의 정밀 싱크 배열.
       각 segment는 {"chord": "해당 단어 바로 위에 시작하는 코드 기호 (분수코드 포함, 없으면 빈 문자열)", "lyric": "해당 단어/어절"}
 
@@ -181,6 +184,60 @@ async function toBase64Image(source: string | Blob): Promise<{ mimeType: string;
 }
 
 /**
+ * 동아시아 문자 폭 계산 (한글 완성형/자모/한자는 2, 영문/숫자/공백/하이픈은 1)
+ */
+export function getEastAsianCharWidth(char: string): number {
+  const code = char.charCodeAt(0);
+  if (
+    (code >= 0xac00 && code <= 0xd7a3) || // 한글 완성형
+    (code >= 0x1100 && code <= 0x11ff) || // 한글 자모
+    (code >= 0x3130 && code <= 0x318f) || // 한글 호환 자모
+    (code >= 0x4e00 && code <= 0x9fff) || // 한자
+    (code >= 0xff01 && code <= 0xff60)    // 전각 기호
+  ) {
+    return 2;
+  }
+  return 1;
+}
+
+export function getEastAsianStringWidth(str: string): number {
+  let w = 0;
+  for (let i = 0; i < str.length; i++) {
+    w += getEastAsianCharWidth(str[i]);
+  }
+  return w;
+}
+
+/**
+ * segments 배열을 바탕으로 모노스페이스 상에서 코드와 가사가 칼같이 1:1 수직 정렬되는 텍스트 생성
+ */
+export function buildSyncedLineFromSegments(segments: ScoreSegment[]): { chordLine: string; lyricLine: string } {
+  if (!segments || segments.length === 0) return { chordLine: '', lyricLine: '' };
+
+  let chordLine = '';
+  let lyricLine = '';
+
+  for (const seg of segments) {
+    const chord = (seg.chord || '').trim();
+    const lyric = seg.lyric || '';
+
+    const chordW = getEastAsianStringWidth(chord);
+    const lyricW = getEastAsianStringWidth(lyric);
+
+    // 해당 세그먼트가 차지할 공통 폭: 코드와 가사 중 더 긴 폭 + 마진 1칸
+    const targetW = Math.max(chordW, lyricW) + (chord ? 1 : 0);
+
+    chordLine += chord + ' '.repeat(Math.max(0, targetW - chordW));
+    lyricLine += lyric + ' '.repeat(Math.max(0, targetW - lyricW));
+  }
+
+  return {
+    chordLine: chordLine.trimEnd(),
+    lyricLine: lyricLine.trimEnd()
+  };
+}
+
+/**
  * 섹션 배열을 모노스페이스 코드+가사 텍스트 포맷으로 변환
  */
 export function formatScoreSectionsToText(sections: ScoreSection[]): string {
@@ -188,6 +245,16 @@ export function formatScoreSectionsToText(sections: ScoreSection[]): string {
   
   return sections.map(section => {
     const linesText = (section.lines || []).map(line => {
+      // 1. segments가 있으면 수학적 1:1 수직 정렬 엔진으로 완벽하게 빌드
+      if (line.segments && Array.isArray(line.segments) && line.segments.length > 0) {
+        const { chordLine, lyricLine } = buildSyncedLineFromSegments(line.segments);
+        if (chordLine) {
+          return `${chordLine}\n${lyricLine}`;
+        }
+        return lyricLine;
+      }
+
+      // 2. segments가 없으면 chordLineText와 fullLyrics 사용
       if (line.chordLineText && line.chordLineText.trim().length > 0) {
         return `${line.chordLineText}\n${line.fullLyrics}`;
       }
@@ -200,44 +267,13 @@ export function formatScoreSectionsToText(sections: ScoreSection[]): string {
 }
 
 /**
- * 악보 이미지 AI 분석 실행 (1차: 서버리스 함수 은닉 호출, 2차: 직접 호출 폴백)
+ * 직접 Gemini API 호출 실행 (최신 프롬프트 즉시 반영)
  */
-export async function analyzeScoreImage(
-  imageSource: string | Blob, 
-  customApiKey?: string
+async function executeGeminiVisionAnalysis(
+  mimeType: string,
+  base64Data: string,
+  apiKey: string
 ): Promise<ScoreAnalysisResult> {
-  // 1. 이미지를 Base64 데이터로 변환
-  const { mimeType, base64Data } = await toBase64Image(imageSource);
-
-  // 2. [보안 최우선] Cloud Functions 서버리스 함수(analyzeScoreCallable) 호출
-  // 브라우저 네트워크 탭에 Gemini API 키가 절대 노출되지 않도록 서버 내부에서 처리합니다.
-  try {
-    const { functions } = await import('./firebaseConfig');
-    const { httpsCallable } = await import('firebase/functions');
-    const analyzeCallable = httpsCallable<any, { success: boolean; result: ScoreAnalysisResult }>(
-      functions,
-      'analyzeScoreCallable'
-    );
-    const serverRes = await analyzeCallable({
-      mimeType: mimeType || 'image/jpeg',
-      base64Data,
-      customApiKey: customApiKey || undefined
-    });
-
-    if (serverRes?.data?.success && serverRes.data.result) {
-      console.log('[aiScoreService] Serverless analysis completed securely.');
-      return serverRes.data.result;
-    }
-  } catch (serverErr: any) {
-    console.warn('[aiScoreService] Serverless callable bypassed or failed, trying fallback:', serverErr?.message || serverErr);
-  }
-
-  // 3. 서버리스 미도달 시 안전한 로컬 폴백
-  const apiKey = (customApiKey && customApiKey.trim()) || getGeminiApiKey();
-  if (!apiKey) {
-    throw new Error('Gemini API 키가 설정되지 않았습니다.');
-  }
-
   const requestBody = {
     contents: [
       {
@@ -262,7 +298,6 @@ export async function analyzeScoreImage(
 
   let lastError: any = null;
 
-  // 2. 최신 모델 체인 순차 시도 (sermon 앱의 MAIN_ENGINE_MODELS 규격)
   for (const modelName of GEMINI_VISION_MODELS) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(apiKey)}`;
@@ -281,9 +316,8 @@ export async function analyzeScoreImage(
         try { errorJson = JSON.parse(errorText); } catch {}
         
         const message = errorJson?.error?.message || errorText;
-        // 크레딧 부족(402) 또는 할당량 초과(429) 등 특정 에러 상세 표기
         if (response.status === 402) {
-          throw new Error('Gemini API 크레딧이 소진되었습니다. Google AI Studio 계정의 크레딧 충전을 확인해 주세요.');
+          throw new Error('Gemini API 크레딧이 소진되었습니다.');
         }
         if (response.status === 429) {
           throw new Error('Gemini API 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요.');
@@ -303,7 +337,6 @@ export async function analyzeScoreImage(
         continue;
       }
 
-      // JSON 파싱 (코드블록 방어)
       let cleaned = rawText.trim();
       if (cleaned.startsWith('```')) {
         cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
@@ -319,5 +352,51 @@ export async function analyzeScoreImage(
     }
   }
 
-  throw lastError || new Error('악보 분석 처리에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+  throw lastError || new Error('Gemini 직접 호출 처리에 실패했습니다.');
 }
+
+/**
+ * 악보 이미지 AI 분석 실행 (최신 직접 호출 우선 -> 서버리스 폴백)
+ */
+export async function analyzeScoreImage(
+  imageSource: string | Blob, 
+  customApiKey?: string
+): Promise<ScoreAnalysisResult> {
+  // 1. 이미지를 Base64 데이터로 변환
+  const { mimeType, base64Data } = await toBase64Image(imageSource);
+
+  // 2. 최신 프롬프트와 정밀 CJK 싱크 엔진이 즉시 반영되는 직접 호출 우선 시도
+  const apiKey = (customApiKey && customApiKey.trim()) || getGeminiApiKey();
+  if (apiKey) {
+    try {
+      return await executeGeminiVisionAnalysis(mimeType, base64Data, apiKey);
+    } catch (directErr: any) {
+      console.warn('[aiScoreService] Direct Gemini call failed, trying serverless fallback:', directErr?.message || directErr);
+    }
+  }
+
+  // 3. 서버리스 함수(analyzeScoreCallable) 폴백
+  try {
+    const { functions } = await import('./firebaseConfig');
+    const { httpsCallable } = await import('firebase/functions');
+    const analyzeCallable = httpsCallable<any, { success: boolean; result: ScoreAnalysisResult }>(
+      functions,
+      'analyzeScoreCallable'
+    );
+    const serverRes = await analyzeCallable({
+      mimeType: mimeType || 'image/jpeg',
+      base64Data,
+      customApiKey: customApiKey || undefined
+    });
+
+    if (serverRes?.data?.success && serverRes.data.result) {
+      console.log('[aiScoreService] Serverless analysis completed securely.');
+      return serverRes.data.result;
+    }
+  } catch (serverErr: any) {
+    console.warn('[aiScoreService] Serverless callable bypassed or failed:', serverErr?.message || serverErr);
+  }
+
+  throw new Error('악보 분석 처리에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+}
+

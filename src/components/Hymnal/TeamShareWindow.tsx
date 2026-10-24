@@ -9,10 +9,13 @@ import {
   ChevronLeft, ChevronRight, Share2, Copy, Check, MessageSquare, Send, 
   Trash2, Megaphone, Edit2, Video, Music, Radio, 
   Eye, ScrollText, StickyNote, X, Play, Users, UserCheck, Clock, ShieldCheck, Sparkles, User, RefreshCw,
-  Download, Loader2
+  Download, Loader2, FileText, ArrowRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { generateContiPackagePDF, type PackageSongItem } from '../../utils/pdfPackageGenerator';
+import { LiveStagePrompter } from './LiveStagePrompter';
+import { parseTextToSongFormBlocks } from '../../utils/songFormUtils';
+import type { SongFormBlock } from '../../types/hymnal';
 
 interface CommentItem {
   id: string;
@@ -91,8 +94,21 @@ export const TeamShareWindow: React.FC<{
   const [showProfileEditModal, setShowProfileEditModal] = useState(false);
   const [profileRoleDraft, setProfileRoleDraft] = useState(myRole);
   const [profileCustomRoleDraft, setProfileCustomRoleDraft] = useState(customRole);
-  const [profileNickDraft, setProfileNickDraft] = useState(myNick);
   const [isMigratingProfile, setIsMigratingProfile] = useState(false);
+
+  // 라이브 프롬프터 및 코드 텍스트 토글 상태
+  const [activePrompterSong, setActivePrompterSong] = useState<{
+    title: string;
+    songKey?: string;
+    meter?: string;
+    rhythm?: string;
+    performanceMemo?: string;
+    instrumentMemo?: string;
+    songFormText?: string;
+    bpm?: number;
+    blocks: SongFormBlock[];
+  } | null>(null);
+  const [openChordTextKeys, setOpenChordTextKeys] = useState<Record<string, boolean>>({});
 
   // 찬양팀 접속 시 브라우저 뒤로가기로 메인 앱 이탈 방지
   useEffect(() => {
@@ -376,7 +392,13 @@ export const TeamShareWindow: React.FC<{
           number: info.number,
           filePath: info.filePath,
           fileId: info.fileId,
-          youtubeVideos: info.youtubeVideos || []
+          youtubeVideos: info.youtubeVideos || [],
+          songForm: info.songForm || '',
+          songFormBlocks: info.songFormBlocks || null,
+          songFormText: info.songFormText || info.performanceMemo || '',
+          chordText: info.chordText || '',
+          lyrics: info.lyrics || '',
+          bpm: info.bpm || 72,
         },
         index: idx
       }));
@@ -385,7 +407,7 @@ export const TeamShareWindow: React.FC<{
     return [];
   }, [currentConti, songs, cloudContiData]);
 
-  // 인도자: 콘티 및 곡 메타데이터를 Firestore에 자동 발행(Publish)하여 팀원이 가볍게 받을 수 있도록 함
+  // 인도자: 콘티 및 곡 메타데이터(악보, 송폼, 코드, 유튜브)를 Firestore에 자동 발행(Publish)하여 팀원이 실시간 수신
   useEffect(() => {
     if (!isLeader || !currentConti || !selectedContiId || contiSongsWithItems.length === 0) return;
     const cleanTeamId = (worshipTeamName || 'default_team').trim().replace(/[\/\s#?]/g, '_');
@@ -397,12 +419,21 @@ export const TeamShareWindow: React.FC<{
       title: song?.title || '제목 없음',
       code: song?.code || '',
       meter: song?.meter || '',
+      rhythm: song?.rhythm || '',
+      performanceMemo: song?.performanceMemo || '',
+      instrumentMemo: song?.instrumentMemo || '',
       number: song?.number || 0,
       filePath: song?.filePath || '',
       fileId: song?.fileId || '',
       crop: item.crop || null,
       memo: item.memo || '',
-      youtubeVideos: song?.youtubeVideos || []
+      youtubeVideos: song?.youtubeVideos || [],
+      songForm: song?.songForm || songForms[item.id] || '',
+      songFormBlocks: song?.songFormBlocks || null,
+      songFormText: song?.songFormText || song?.performanceMemo || '',
+      chordText: song?.chordText || '',
+      lyrics: song?.lyrics || '',
+      bpm: song?.bpm || 72,
     }));
 
     setDoc(contiDocRef, {
@@ -413,7 +444,7 @@ export const TeamShareWindow: React.FC<{
       songsInfo,
       publishedAt: Date.now()
     }, { merge: true }).catch(console.warn);
-  }, [isLeader, currentConti, selectedContiId, worshipTeamName, contiSongsWithItems.length]);
+  }, [isLeader, currentConti, selectedContiId, worshipTeamName, contiSongsWithItems]);
 
   // 2. 뷰 모드: 'scroll' (스크롤 종합 뷰) vs 'viewer' (실전 악보 뷰어)
   const [viewMode, setViewMode] = useState<'scroll' | 'viewer'>('scroll');
@@ -1177,6 +1208,11 @@ export const TeamShareWindow: React.FC<{
                                 {song.meter}
                               </span>
                             )}
+                            {song?.rhythm && (
+                              <span className="text-[10px] font-semibold px-2 py-0.5 bg-[#F0F7FF] text-[#1E88E5] rounded-md border border-[#BBDEFB]">
+                                {song.rhythm}
+                              </span>
+                            )}
                             {song?.number && song.number > 0 && (
                               <span className="text-[10px] font-medium text-[#8C877D]">
                                 #{song.number}
@@ -1196,26 +1232,55 @@ export const TeamShareWindow: React.FC<{
 
                     {/* 송폼 (Song Form) 영역 */}
                     <div className="bg-[#FAF9F5] border border-[#E5E0D8] rounded-2xl p-3.5 space-y-2">
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
                         <span className="text-[11px] font-bold text-[#8C877D] uppercase tracking-wider flex items-center gap-1.5">
                           <Music className="w-3.5 h-3.5 text-[#D97757]" /> 송폼 (Song Form)
                         </span>
-                        {isManager && (
-                          <button
-                            onClick={() => {
-                              if (editingSongFormId === item.id) {
-                                setEditingSongFormId(null);
-                              } else {
-                                setEditingSongFormId(item.id);
-                                setSongFormDraft(currentForm);
-                              }
-                            }}
-                            className="text-[11px] font-medium text-[#D97757] hover:underline flex items-center gap-1 cursor-pointer"
-                          >
-                            <Edit2 className="w-3 h-3" />
-                            <span>{editingSongFormId === item.id ? '닫기' : '송폼 편집'}</span>
-                          </button>
-                        )}
+                        <div className="flex items-center gap-1.5">
+                          {/* 라이브 프롬프터 실행 버튼 */}
+                          {(currentForm || (song?.songFormBlocks && song.songFormBlocks.length > 0)) && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const blocks = song?.songFormBlocks && song.songFormBlocks.length > 0
+                                  ? song.songFormBlocks
+                                  : parseTextToSongFormBlocks(currentForm || '');
+                                setActivePrompterSong({
+                                  title: song?.title || '찬양',
+                                  songKey: song?.code || 'C',
+                                  meter: song?.meter || '4/4',
+                                  rhythm: song?.rhythm || '',
+                                  performanceMemo: song?.performanceMemo || '',
+                                  instrumentMemo: song?.instrumentMemo || '',
+                                  songFormText: song?.songFormText || '',
+                                  bpm: song?.bpm || 72,
+                                  blocks,
+                                });
+                              }}
+                              className="flex items-center gap-1 px-2.5 py-1 bg-[#1A1A22] hover:bg-[#282836] text-[#E07A5F] rounded-lg text-xs font-bold transition-all shadow-2xs border border-[#3A3A4C] cursor-pointer"
+                              title="무대용 실시간 라이브 프롬프터 실행"
+                            >
+                              <Play className="w-3 h-3 fill-current" />
+                              <span>프롬프터</span>
+                            </button>
+                          )}
+                          {isManager && (
+                            <button
+                              onClick={() => {
+                                if (editingSongFormId === item.id) {
+                                  setEditingSongFormId(null);
+                                } else {
+                                  setEditingSongFormId(item.id);
+                                  setSongFormDraft(currentForm);
+                                }
+                              }}
+                              className="text-[11px] font-medium text-[#D97757] hover:underline flex items-center gap-1 cursor-pointer"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                              <span>{editingSongFormId === item.id ? '닫기' : '송폼 편집'}</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       {editingSongFormId === item.id && isManager ? (
@@ -1267,13 +1332,15 @@ export const TeamShareWindow: React.FC<{
                       ) : (
                         <div className="flex flex-wrap gap-1.5 items-center pt-0.5">
                           {currentForm ? (
-                            currentForm.split('-').map((block, bIdx) => (
-                              <span
-                                key={bIdx}
-                                className="px-2.5 py-1 bg-white border border-[#E5E0D8] rounded-lg text-xs font-bold text-[#2B2927] shadow-2xs"
-                              >
-                                {block.trim()}
-                              </span>
+                            currentForm.split('-').map((block, bIdx, arr) => (
+                              <React.Fragment key={bIdx}>
+                                <span className="px-2.5 py-1 bg-white border border-[#E5E0D8] rounded-lg text-xs font-bold text-[#2B2927] shadow-2xs">
+                                  {block.trim()}
+                                </span>
+                                {bIdx < arr.length - 1 && (
+                                  <ArrowRight className="w-3 h-3 text-[#A3A19B] shrink-0 stroke-[2px]" />
+                                )}
+                              </React.Fragment>
                             ))
                           ) : (
                             <span className="text-xs text-[#A8A49C] italic">
@@ -1283,6 +1350,86 @@ export const TeamShareWindow: React.FC<{
                         </div>
                       )}
                     </div>
+
+                    {/* 인도자 메모 및 연주/악기 메모 영역 */}
+                    {(song?.songFormBlocks?.some(b => b.memo && b.memo.trim()) || song?.songFormText || song?.performanceMemo || song?.instrumentMemo) && (
+                      <div className="bg-[#FAF9F5] border border-[#E5E0D8] rounded-2xl p-3.5 space-y-2">
+                        {song?.songFormBlocks?.some(b => b.memo && b.memo.trim()) ? (
+                          <div className="space-y-2">
+                            <span className="text-[10px] font-bold px-2 py-0.5 bg-[#FAF0EB] text-[#D97757] rounded-md border border-[#F1D3C6] font-mono inline-block">
+                              인도자 송폼 파트별 메모
+                            </span>
+                            <div className="space-y-1.5 pl-1">
+                              {song.songFormBlocks.filter(b => b.memo && b.memo.trim()).map((b, mIdx) => (
+                                <div key={b.id || mIdx} className="flex items-start gap-2">
+                                  <span className="px-2 py-0.5 bg-[#18181B] text-white rounded text-[10px] font-bold shrink-0 font-mono">
+                                    {b.type}{b.repeatCount > 1 ? ` (x${b.repeatCount})` : b.repeatCount === 0 ? ' (x∞)' : ''}
+                                  </span>
+                                  <p className="text-xs text-[#2B2927] font-medium leading-relaxed pt-0.5 whitespace-pre-wrap">
+                                    {b.memo}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : song?.songFormText ? (
+                          <div className="flex items-start gap-2">
+                            <span className="text-[10px] font-bold px-2 py-0.5 bg-[#FAF0EB] text-[#D97757] rounded-md border border-[#F1D3C6] shrink-0 font-mono">
+                              인도자 메모
+                            </span>
+                            <p className="text-xs text-[#2B2927] font-medium leading-relaxed pt-0.5 whitespace-pre-wrap">
+                              {song.songFormText}
+                            </p>
+                          </div>
+                        ) : (
+                          <>
+                            {song?.performanceMemo && (
+                              <div className="flex items-start gap-2">
+                                <span className="text-[10px] font-bold px-2 py-0.5 bg-[#FAF0EB] text-[#D97757] rounded-md border border-[#F1D3C6] shrink-0 font-mono">
+                                  연주
+                                </span>
+                                <p className="text-xs text-[#2B2927] font-medium leading-relaxed pt-0.5 whitespace-pre-wrap">
+                                  {song.performanceMemo}
+                                </p>
+                              </div>
+                            )}
+                            {song?.instrumentMemo && (
+                              <div className="flex items-start gap-2">
+                                <span className="text-[10px] font-bold px-2 py-0.5 bg-[#F0F7FF] text-[#1976D2] rounded-md border border-[#BBDEFB] shrink-0 font-mono">
+                                  악기
+                                </span>
+                                <p className="text-xs text-[#2B2927] font-medium leading-relaxed pt-0.5 whitespace-pre-wrap">
+                                  {song.instrumentMemo}
+                                </p>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 코드악보TEXT (가사 & 코드 텍스트) 영역 */}
+                    {song?.chordText && (
+                      <div className="bg-[#FAF9F5] border border-[#E5E0D8] rounded-2xl p-3.5 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-[#8C877D] uppercase tracking-wider flex items-center gap-1.5">
+                            <FileText className="w-3.5 h-3.5 text-[#C96442]" /> 코드악보TEXT (가사 & 코드)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setOpenChordTextKeys(prev => ({ ...prev, [item.id]: !prev[item.id] }))}
+                            className="text-[11px] font-semibold text-[#C96442] hover:underline cursor-pointer"
+                          >
+                            {openChordTextKeys[item.id] ? '접기 ▲' : '텍스트 펼치기 ▼'}
+                          </button>
+                        </div>
+                        {openChordTextKeys[item.id] && (
+                          <div className="p-3.5 bg-white rounded-xl border border-[#E5E0D8] font-chord text-xs text-[#2C2B29] whitespace-pre overflow-x-auto leading-relaxed shadow-inner">
+                            {song.chordText}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* 악보 이미지 영역 */}
                     <div className="relative overflow-hidden bg-[#FAF9F5] rounded-2xl border border-[#E5E0D8] flex items-center justify-center p-2 sm:p-4">
@@ -2026,6 +2173,22 @@ export const TeamShareWindow: React.FC<{
           </div>
         )}
       </AnimatePresence>
+
+      {/* 실전 무대용 라이브 프롬프터 모달 (찬양팀 공유 링크에서 직접 실행 가능) */}
+      {activePrompterSong && (
+        <LiveStagePrompter
+          title={activePrompterSong.title}
+          songKey={activePrompterSong.songKey}
+          meter={activePrompterSong.meter}
+          rhythm={activePrompterSong.rhythm}
+          performanceMemo={activePrompterSong.performanceMemo}
+          instrumentMemo={activePrompterSong.instrumentMemo}
+          songFormText={activePrompterSong.songFormText}
+          bpm={activePrompterSong.bpm || 72}
+          blocks={activePrompterSong.blocks}
+          onClose={() => setActivePrompterSong(null)}
+        />
+      )}
     </div>
   );
 };

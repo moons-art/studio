@@ -169,20 +169,23 @@ const SCORE_ANALYSIS_SYSTEM_PROMPT = `당신은 최고 수준의 시각 악보 �
 
 ---
 
-### [규칙 3: 손글씨/펜글씨 악보 및 음악 늘임표('-') 정제]
+### [규칙 3: 박자 싱크를 위한 음절 하이픈('-') 및 마디 호흡 정제]
 1. 펜글씨, 흘림체, 손글씨 악보의 음표 아래 적힌 한글 자모를 문맥과 함께 정밀 해독하세요.
-2. 악보 특성상 음표 길이나 멜리스마 때문에 음절 사이에 들어간 하이픈('-')과 부자연스러운 글자 띄어쓰기는 음악적 기호이므로, 하이픈을 모두 제거하고 일상적인 자연스러운 표준 한국어 문장으로 결합하세요.
+2. **코드와 가사의 수직 싱크를 맞추기 위한 핵심 지침**:
+   - 악보에서 한 마디 안의 음표 박자가 길거나(2분음표, 온음표, 붙임줄 등), 쉼표가 있거나, 가사 글자 수가 적어 코드가 뒤로 밀릴 때:
+   - 가사 음절 사이에 **'-'**(하이픈)이나 음절 간격을 적절히 넣어(예: '나-가리', '예 - - - 수', '오 - 주님', '내가- 정금 같 - 이 - 나아오 리 라') 각 박자의 연주 길이를 표현하고, 코드가 해당 음절 바로 위에 1:1 수직으로 정확히 일치하도록 맞추세요.
+   - 단, 박자 연장이 없는 일반적인 음절은 자연스러운 한국어 어절로 띄어쓰기를 유지하세요.
 
 ---
 
 ### [규칙 4: 가사-코드 1:1 정밀 음절 싱크 (Strict Syllable-Chord Sync)]
 1. 악보의 각 섹션을 분석하여 "sections" 배열로 구성하세요.
 2. 각 줄(line)마다:
-   - "fullLyrics": 하이픈이 완전히 정제된 온전한 가사 1줄
+   - "fullLyrics": 박자 연장 하이픈('-')이 반영된 악보 기준 가사 1줄
    - "chords": 해당 가사 줄에 등장하는 코드 목록
      - "chord": 코드 기호 (예: "A", "E/G#", "Bm7", "F#m")
      - "lyricCharIndex": 해당 코드가 소리 나는 가사 글자의 0부터 시작하는 정확한 인덱스
-   - "chordLineText": 모노스페이스(Monospace) 폰트에서 가사 바로 윗줄에 띄웠을 때 각 코드가 해당 음절 바로 위에 정확히 위치하도록 공백(스페이스)을 계산하여 배치한 코드 줄 텍스트
+   - "chordLineText": CJK 모노스페이스(한글 1글자 = 공백 2칸) 기준, 가사 바로 윗줄에 띄웠을 때 각 코드가 해당 음절 바로 위에 정확히 위치하도록 공백(스페이스)을 계산하여 배치한 코드 줄 텍스트
 
 ---
 
@@ -318,5 +321,94 @@ export const analyzeScoreCallable = onCall(
 
     console.error("[analyzeScoreCallable] All vision models exhausted:", lastError);
     throw new HttpsError("internal", lastError?.message || "악보 분석 모델 호출 실패");
+  }
+);
+
+/**
+ * 5. 유튜브 찬양 영상 무과금/무키 고속 검색 서버리스 함수 (Zero-Cost & Zero-Key)
+ */
+export const searchYoutubeVideosCallable = onCall(
+  {
+    region: "asia-northeast3",
+    memory: "256MiB",
+    timeoutSeconds: 15,
+    minInstances: 0,
+  },
+  async (request) => {
+    const { query, maxResults = 15 } = request.data || {};
+    if (!query || typeof query !== "string") {
+      throw new HttpsError("invalid-argument", "검색어가 누락되었습니다.");
+    }
+
+    const cleanQuery = `${query.trim()} CCM 찬양`.trim();
+    const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(cleanQuery)}`;
+
+    try {
+      const response = await fetch(searchUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`YouTube responded with status ${response.status}`);
+      }
+
+      const html = await response.text();
+      const match =
+        html.match(/var ytInitialData = ({.*?});<\/script>/s) ||
+        html.match(/ytInitialData\s*=\s*({.*?});/s);
+
+      if (!match) {
+        return { success: true, videos: [] };
+      }
+
+      const parsedData = JSON.parse(match[1]);
+      const contents =
+        parsedData.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
+
+      const videos: Array<{
+        videoId: string;
+        title: string;
+        channelTitle: string;
+        thumbnail: string;
+        duration: string;
+      }> = [];
+
+      for (const section of contents) {
+        const items = section.itemSectionRenderer?.contents || [];
+        for (const item of items) {
+          const vr = item.videoRenderer;
+          if (vr && vr.videoId) {
+            const rawThumb =
+              vr.thumbnail?.thumbnails?.[vr.thumbnail.thumbnails.length - 1]?.url ||
+              vr.thumbnail?.thumbnails?.[0]?.url ||
+              `https://i.ytimg.com/vi/${vr.videoId}/hqdefault.jpg`;
+            const cleanThumb = rawThumb.startsWith("//") ? `https:${rawThumb}` : rawThumb;
+
+            videos.push({
+              videoId: vr.videoId,
+              title: vr.title?.runs?.map((r: any) => r.text).join("") || "",
+              channelTitle: vr.ownerText?.runs?.map((r: any) => r.text).join("") || "",
+              thumbnail: cleanThumb,
+              duration: vr.lengthText?.simpleText || "",
+            });
+
+            if (videos.length >= maxResults) break;
+          }
+        }
+        if (videos.length >= maxResults) break;
+      }
+
+      return {
+        success: true,
+        query: cleanQuery,
+        videos,
+      };
+    } catch (err: any) {
+      console.error("[searchYoutubeVideosCallable] Error:", err);
+      throw new HttpsError("internal", err?.message || "유튜브 검색 중 오류가 발생했습니다.");
+    }
   }
 );

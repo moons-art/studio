@@ -16,7 +16,8 @@ import {
   Plus,
   X,
   Download,
-  Upload
+  Upload,
+  Eraser
 } from 'lucide-react';
 import { hymnalApi } from '../../api/hymnalApi';
 import { logActivity } from '../../utils/logger';
@@ -61,7 +62,6 @@ export const HymnalSidebar: React.FC = () => {
   const [isHymnalVisible, setIsHymnalVisible] = useState(getIsHymnalVisible());
   const [userPlan, setUserPlan] = useState(getUserPlan());
   const [showAlbumSelectModal, setShowAlbumSelectModal] = useState(false);
-  const [enableAiScoreAnalysis, setEnableAiScoreAnalysis] = useState(false);
   const [albumModalAction, setAlbumModalAction] = useState<'add_song' | 'excel_download' | 'excel_upload'>('add_song');
 
   // 앨범별 곡 수 실시간 집계
@@ -108,6 +108,42 @@ export const HymnalSidebar: React.FC = () => {
 
   const isAuthenticated = !!(auth.currentUser || localStorage.getItem('gdrive_token') || localStorage.getItem('nations_recent_login_provider') || localStorage.getItem('offline_user_profile'));
 
+  // 앨범 비우기 (앨범은 유지하고 해당 앨범 안의 곡들만 모두 삭제)
+  const handleClearAlbum = async (albumId: string, albumName: string) => {
+    const albumSongs = songs.filter(s => s.albumId === albumId);
+    if (albumSongs.length === 0) {
+      alert(`'${albumName}' 앨범에 등록된 곡이 없습니다.`);
+      return;
+    }
+
+    if (!confirm(`'${albumName}' 앨범에 속한 모든 악보(${albumSongs.length}곡)를 비우시겠습니까?\n(앨범은 그대로 유지되고 악보들만 삭제됩니다.)`)) {
+      return;
+    }
+
+    // 1. 낙관적 UI 업데이트 (해당 앨범 곡 즉시 필터링)
+    setSongs(prev => prev.filter(s => s.albumId !== albumId));
+
+    // 2. 백그라운드에서 해당 곡들 순차 삭제
+    for (const song of albumSongs) {
+      const targetFileId = (song as any)?.fileId;
+      const targetStorageUrl = (song as any)?.storageUrl || (song as any)?.filePath;
+      hymnalApi.deleteSong(song.id, true, targetFileId, targetStorageUrl).catch(e => {
+        console.error('[HymnalSidebar] clearAlbum song delete failed:', e);
+      });
+    }
+
+    logActivity('앨범 비우기', `'${albumName}' 앨범의 악보 ${albumSongs.length}곡 비움`);
+  };
+
+  // 앨범 삭제 (앨범 자체와 포함된 곡들 삭제)
+  const handleDeleteAlbumDirect = async (albumId: string, albumName: string) => {
+    if (!confirm(`'${albumName}' 앨범과 포함된 모든 악보를 삭제하시겠습니까?\n(삭제 후 복구되지 않습니다.)`)) {
+      return;
+    }
+    await deleteAlbum(albumId);
+    logActivity('앨범 삭제', `'${albumName}' 앨범 삭제`);
+  };
+
   // 대량 앨범 업로드 처리
   const handleAlbumUpload = async (isHymnal: boolean = false, targetAlbum?: Album) => {
     if (!isAuthenticated) {
@@ -147,7 +183,7 @@ export const HymnalSidebar: React.FC = () => {
       // 신규 추가된 파일들만 선별하여 구글 드라이브 업로드 수행 (데이터베이스 json 수정 안함)
       const newSongs = await hymnalApi.batchUploadImagesToGDrive(filesToUpload, albumName, (processed, total) => {
         setUploadProgress({ processed, total });
-      }, albumId, enableAiScoreAnalysis);
+      }, albumId);
 
       // 3. 앨범 목록 업데이트
       if (!albums.find(a => a.id === albumId)) {
@@ -217,8 +253,7 @@ export const HymnalSidebar: React.FC = () => {
         (processed, total) => {
           setUploadProgress({ processed, total });
         },
-        targetAlbumId,
-        enableAiScoreAnalysis
+        targetAlbumId
       );
 
       // 100% 완료 상태 유지 후 UI 피드백 제공
@@ -399,6 +434,20 @@ export const HymnalSidebar: React.FC = () => {
             <span className="text-[10px] font-semibold text-[#8C877D] ml-auto shrink-0 bg-[#E8E2D8]/60 px-1.5 py-0.5 rounded-md">
               {albumSongCountMap.get('misc') || 0}
             </span>
+
+            {/* 미분류 앨범 비우기 버튼 */}
+            <button
+              type="button"
+              disabled={isUploading}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleClearAlbum('misc', '미분류');
+              }}
+              className="p-1 hover:bg-[#DED8CE]/80 text-[#8C877D] hover:text-[#C96442] rounded-md transition-colors cursor-pointer opacity-0 group-hover:opacity-100 shrink-0"
+              title="'미분류' 앨범 비우기 (악보만 모두 삭제)"
+            >
+              <Eraser className="w-3.5 h-3.5 stroke-[1.8px]" />
+            </button>
           </div>
 
           {/* 그 외 개별 커스텀 앨범 목록 (프리 사용자는 미분류 1개만 보이고 커스텀 앨범 숨김) */}
@@ -428,23 +477,51 @@ export const HymnalSidebar: React.FC = () => {
                 {albumSongCountMap.get(album.id) || 0}
               </span>
 
-              <button 
-                disabled={isUploading}
-                onClick={(e) => {
-                  if (isUploading) return;
-                  e.stopPropagation();
-                  setEditingAlbum(album);
-                  setShowAlbumModal(true);
-                }}
-                className={`p-1 text-[#8C877D] rounded-md transition-all shrink-0 ${
-                  isUploading 
-                    ? 'opacity-20 cursor-not-allowed' 
-                    : 'hover:text-[#2B2927] hover:bg-[#DED8CE]/60 opacity-0 group-hover:opacity-100 cursor-pointer'
-                }`}
-                title={isUploading ? "업로드 중에는 앨범을 설정할 수 없습니다." : "앨범 설정"}
-              >
-                <MoreVertical className="w-3.5 h-3.5 stroke-[1.8px]" />
-              </button>
+              {/* 심플 퀵 액션 버튼들 (앨범 비우기 & 앨범 삭제 & 상세설정) */}
+              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                {/* 앨범 비우기 (Eraser) */}
+                <button
+                  type="button"
+                  disabled={isUploading}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleClearAlbum(album.id, album.name);
+                  }}
+                  className="p-1 hover:bg-[#DED8CE]/80 text-[#8C877D] hover:text-[#C96442] rounded-md transition-colors cursor-pointer"
+                  title={`'${album.name}' 앨범 비우기 (악보만 모두 삭제)`}
+                >
+                  <Eraser className="w-3.5 h-3.5 stroke-[1.8px]" />
+                </button>
+
+                {/* 앨범 삭제 (Trash2) */}
+                <button
+                  type="button"
+                  disabled={isUploading}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteAlbumDirect(album.id, album.name);
+                  }}
+                  className="p-1 hover:bg-[#FAF0EB] text-[#8C877D] hover:text-red-600 rounded-md transition-colors cursor-pointer"
+                  title={`'${album.name}' 앨범 완전 삭제`}
+                >
+                  <Trash2 className="w-3.5 h-3.5 stroke-[1.8px]" />
+                </button>
+
+                {/* 상세 설정 (MoreVertical) */}
+                <button 
+                  disabled={isUploading}
+                  onClick={(e) => {
+                    if (isUploading) return;
+                    e.stopPropagation();
+                    setEditingAlbum(album);
+                    setShowAlbumModal(true);
+                  }}
+                  className="p-1 text-[#8C877D] hover:text-[#2B2927] hover:bg-[#DED8CE]/60 rounded-md transition-colors cursor-pointer"
+                  title="앨범 이름 수정 및 추가 설정"
+                >
+                  <MoreVertical className="w-3.5 h-3.5 stroke-[1.8px]" />
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -669,6 +746,24 @@ export const HymnalSidebar: React.FC = () => {
                       </button>
                     </div>
                     
+                    {/* 앨범 비우기 */}
+                    <button 
+                      onClick={() => {
+                        handleClearAlbum(editingAlbum.id, editingAlbum.name);
+                        setShowAlbumModal(false);
+                      }}
+                      className="w-full flex items-center gap-3 p-3 bg-white hover:bg-[#FAF9F5] border border-[#E5E0D8] text-[#4A4741] rounded-xl transition-all group text-left cursor-pointer"
+                    >
+                      <div className="w-8 h-8 shrink-0 rounded-lg bg-[#FAF0EB] border border-[#F1D3C6] flex items-center justify-center">
+                        <Eraser className="w-4 h-4 text-[#C96442] stroke-[1.8px]" />
+                      </div>
+                      <div className="flex flex-col flex-1 min-w-0">
+                        <span className="text-xs font-medium text-[#2B2927]">앨범 비우기</span>
+                        <span className="text-[10px] text-[#8C877D] truncate">앨범은 유지하고 안의 악보들만 모두 삭제합니다</span>
+                      </div>
+                    </button>
+
+                    {/* 앨범 완전 삭제 */}
                     <button 
                       onClick={() => {
                         if (confirm('<주의!> 구글드라이브의 해당 폴더와 파일이 삭제 되어 복구되지 않습니다.\n정말로 삭제하시겠습니까?')) {
@@ -734,21 +829,6 @@ export const HymnalSidebar: React.FC = () => {
                 {albumModalAction === 'add_song' && '파일 제목을 찬양이름으로 수정하여 올리세요'}
                 {albumModalAction === 'excel_download' && '선택한 앨범의 악보 정보를 엑셀로 다운로드합니다.'}
               </p>
-            )}
-
-            {albumModalAction === 'add_song' && (
-              <label className="flex items-center gap-2.5 p-2.5 bg-neutral-50 hover:bg-neutral-100 rounded-xl border border-neutral-200 cursor-pointer select-none mb-3.5 transition-colors">
-                <input 
-                  type="checkbox"
-                  checked={enableAiScoreAnalysis}
-                  onChange={(e) => setEnableAiScoreAnalysis(e.target.checked)}
-                  className="w-4 h-4 rounded accent-black cursor-pointer shrink-0"
-                />
-                <div className="flex flex-col">
-                  <span className="text-xs font-bold text-neutral-900">[✔ AI 악보정보 분석]</span>
-                  <span className="text-[10px] text-neutral-500">업로드 시 이미지에서 곡명, 코드(Key), 박자, 가사+코드를 자동 추출합니다</span>
-                </div>
-              </label>
             )}
 
             <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
