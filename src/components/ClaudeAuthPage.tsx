@@ -64,10 +64,10 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
   const typingLines = [
     { from: '매번 악보를 찾아요', to: '악보 라이브러리 저장' },
     { from: '1장에 모아 출력해요', to: 'A4, A3 악보 자르기 편집' },
-    { from: '매번 유튜브 영상을 찾아요', to: '악보+유튜브 영상 클립 보관' },
-    { from: '가사와 코드를 찾아요', to: 'AI 가사, 코드 자동 생성' },
-    { from: '찬양팀 공유가 힘들어요', to: '콘티, 송폼, 유튜브 영상 원클릭 공유' },
-    { from: '매번 악보를 복사해요', to: '회중용 악보보기 링크제공' }
+    { from: '매번 유튜브 영상을 찾아요', to: '악보+유튜브 영상 자동검색 클립 보관' },
+    { from: '가사와 코드를 찾아요', to: 'AI 가사, 코드, 송폼 생성, 키변환' },
+    { from: '찬양팀 공유가 힘들어요', to: '악보, 콘티, 송폼, 유튜브 영상 원클릭 협업' },
+    { from: '매번 악보를 복사해요', to: '소그룹 악보뷰 제공' }
   ];
   const [displayedLengths, setDisplayedLengths] = useState<number[]>([0, 0, 0, 0, 0, 0]);
 

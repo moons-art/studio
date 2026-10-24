@@ -19,6 +19,14 @@ export interface ScoreSection {
   lines: ScoreLine[];
 }
 
+export interface SongFormAiBlock {
+  type: string;        // 예: 'Intro', 'Verse 1', 'Chorus', 'Bridge', 'Outro'
+  barCount: number;    // 마디 수 (예: 4, 8)
+  repeatCount?: number;// 반복 횟수 (기본 1)
+  chords?: string;     // 해당 파트의 핵심 코드 진행 (예: "C - G/B - Am7 - G")
+  memo?: string;       // 해당 파트의 연주 팁 및 무드 (예: "피아노 아르페지오로 잔잔하게 시작")
+}
+
 export interface ScoreAnalysisResult {
   isSheetMusic: boolean;
   notSheetMusicReason?: string;
@@ -32,6 +40,7 @@ export interface ScoreAnalysisResult {
   theme: string;                     // 주제/장르
   structure: string;                 // 송폼 구조 (예: Verse -> Chorus)
   sections: ScoreSection[];          // 섹션별 코드/가사 싱크
+  songFormBlocks?: SongFormAiBlock[];// 파트별 코드진행 및 연주팁이 포함된 구조화된 송폼 카드 배열
   musicalNotes?: string;             // 연주 팁
 }
 
@@ -144,6 +153,17 @@ const SCORE_ANALYSIS_SYSTEM_PROMPT = `당신은 최고 수준의 시각 악보 �
     - "chordLineText": CJK 모노스페이스(한글 1글자 = 공백 2칸) 기준, 아랫줄의 해당 가사 음절 바로 위에 코드가 수직으로 칼같이 일치하도록 공백을 맞춘 코드 줄 문자열
     - "segments": 어절/단어 단위의 정밀 싱크 배열.
       각 segment는 {"chord": "해당 단어 바로 위에 시작하는 코드 기호 (분수코드 포함, 없으면 빈 문자열)", "lyric": "해당 단어/어절"}
+
+---
+
+### [규칙 6: 찬양팀용 구조화된 송폼 블록 및 파트별 코드진행, 연주팁 자동 구성 (핵심)]
+악보의 기승전결(Intro - Verse - Chorus - Outro 등)과 음악적 호흡을 분석하여 "songFormBlocks" 배열을 반드시 구성하세요:
+각 블록 객체:
+- "type": 송폼 파트명 (예: "Intro", "Verse 1", "Verse 2", "Chorus", "Bridge", "Outro")
+- "barCount": 해당 파트의 마디 수 (숫자, 예: 4 또는 8)
+- "repeatCount": 기본 반복 횟수 (기본 1)
+- "chords": 해당 파트의 대표 코드 진행 (예: "C - G/B - Am7 - G", "F - G - Em - Am")
+- "memo": 찬양팀 인도자 및 연주자를 위한 파트별 연주 팁 및 무드 가이드 1줄 (예: "피아노 아르페지오로 잔잔하게 시작", "풀밴드 강한 드럼 비트로 빌드업", "어쿠스틱 기타와 보컬 중심", "스트링과 함께 점진적 고조")
 
 반드시 순수 JSON 형식으로만 응답하세요. 마크다운 앞뒤 사설을 넣지 마세요.`;
 

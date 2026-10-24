@@ -92,7 +92,7 @@ export const VirtualPiano: React.FC<VirtualPianoProps> = ({
       {/* 건반 상단 상태 바 */}
       <div className="w-full flex items-center justify-between text-[11px] text-[#A3A19B] mb-2 px-1">
         <div className="flex items-center gap-2">
-          <span className="font-semibold text-white">가상 건반 (2 Octaves)</span>
+          <span className="font-semibold text-white">가상 건반</span>
           {activeNotes.length > 0 && (
             <div className="flex items-center gap-1.5 bg-[#2C2A28] px-2 py-0.5 rounded-md border border-[#4A4744]">
               <span className="text-[10px] text-[#D97757] font-bold">화음:</span>
@@ -101,14 +101,6 @@ export const VirtualPiano: React.FC<VirtualPianoProps> = ({
               </span>
             </div>
           )}
-        </div>
-        <div className="flex items-center gap-2 text-[10px]">
-          <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-[#C96442]" /> 루트(Root)
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-[#D97757]" /> 구성음
-          </span>
         </div>
       </div>
 

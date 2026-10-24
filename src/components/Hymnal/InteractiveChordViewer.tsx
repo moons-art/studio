@@ -90,7 +90,7 @@ export const InteractiveChordViewer: React.FC<InteractiveChordViewerProps> = ({
             key={`chord-${lineIdx}-${currentMatchIndex}`}
             type="button"
             onClick={() => handleChordClick(chordStr)}
-            className="inline-flex items-center px-1.5 py-0.5 mx-0.5 bg-[#FAF0EB] hover:bg-[#F4DCD1] active:bg-[#EAC7B6] text-[#C96442] font-mono text-xs font-bold rounded border border-[#F1D3C6] hover:border-[#D97757] transition-all cursor-pointer shadow-2xs hover:scale-105 active:scale-95"
+            className="inline-flex items-center justify-center min-w-[38px] px-1.5 py-0.5 mx-0.5 bg-[#FAF0EB] hover:bg-[#F4DCD1] active:bg-[#EAC7B6] text-[#C96442] font-mono text-xs font-bold rounded border border-[#F1D3C6] hover:border-[#D97757] transition-all cursor-pointer shadow-2xs hover:scale-105 active:scale-95 text-center"
             title={`클릭하여 ${chordStr} 코드 소리 듣기`}
           >
             {chordStr}

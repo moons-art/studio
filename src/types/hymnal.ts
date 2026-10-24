@@ -3,6 +3,7 @@ export interface SongFormBlock {
   type: string; // 'Intro' | 'Verse 1' | 'Verse 2' | 'Pre-Chorus' | 'Chorus' | 'Bridge' | 'Interlude' | 'Vamp' | 'Solo' | 'Outro' | 'Tag'
   repeatCount: number; // 1, 2, 3, 4 (0 for infinity)
   barCount: number; // 4, 8, 16 등
+  chords?: string; // 둘째줄 코드진행 (예: C - G/B - Am7 - G)
   memo?: string; // 인도자가 해당 파트 옆에 적은 메모/텍스트
 }
 

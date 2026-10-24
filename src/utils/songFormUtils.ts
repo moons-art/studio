@@ -83,13 +83,14 @@ export function parseTextToSongFormBlocks(text: string): SongFormBlock[] {
 /**
  * 새 블록 생성 헬퍼
  */
-export function createNewSongFormBlock(partFull: string, barCount?: number, memo?: string): SongFormBlock {
+export function createNewSongFormBlock(partFull: string, barCount?: number, memo?: string, chords?: string): SongFormBlock {
   const match = SONG_FORM_PART_TYPES.find((p) => p.full === partFull);
   return {
     id: `block_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     type: partFull,
     repeatCount: 1,
     barCount: barCount || match?.defaultBars || 8,
+    chords: chords || '',
     memo: memo || '',
   };
 }
