@@ -154,18 +154,21 @@ const MainApp: React.FC = () => {
         cleanUrl.searchParams.delete('orderId');
         window.history.replaceState({}, '', cleanUrl.toString());
 
-        const user = auth.currentUser;
-        if (user) {
-          import('firebase/firestore').then(({ doc, setDoc }) => {
-            import('./api/firebaseConfig').then(({ db }) => {
-              setDoc(doc(db, 'users', user.uid), {
-                plan,
-                subscribedAt: Date.now(),
-              }, { merge: true }).catch(console.warn);
+        // 비동기 인증 복원 대기 리스너 (Auth 복원 즉시 로컬 DB에 권한 동기화)
+        const unsubPaymentAuth = auth.onAuthStateChanged((u) => {
+          if (u) {
+            unsubPaymentAuth();
+            import('firebase/firestore').then(({ doc, setDoc }) => {
+              import('./api/firebaseConfig').then(({ db }) => {
+                setDoc(doc(db, 'users', u.uid), {
+                  plan,
+                  subscribedAt: Date.now(),
+                }, { merge: true }).catch(console.warn);
+              });
             });
-          });
-        }
-        alert(`🎉 결제가 성공적으로 승인되었습니다!\n[${plan.toUpperCase()}] 플랜 권한이 즉시 적용되었습니다.`);
+            alert(`🎉 결제가 성공적으로 승인되었습니다!\n[${plan.toUpperCase()}] 플랜 권한이 즉시 적용되었습니다.`);
+          }
+        });
       }
     }
 

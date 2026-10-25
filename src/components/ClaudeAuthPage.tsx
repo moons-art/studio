@@ -219,7 +219,7 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
     }
 
     const orderId = `ord_studio_${Date.now()}`;
-    const isLocal = window.location.hostname.includes('localhost');
+    const isLocal = window.location.hostname.includes('localhost') || window.location.hostname === '127.0.0.1';
     const hubBase = isLocal ? 'http://localhost:5173' : 'https://sermon.thenations.kr';
     const currentOriginUrl = window.location.origin + window.location.pathname;
 
@@ -238,7 +238,7 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
         orderName: `[Nations Studio] ${planName} (월간 구독)`,
         customerName: user.displayName || '스튜디오 회원',
         customerEmail: user.email || undefined,
-        successUrl: `${hubBase}/payment/success?targetApp=studio&planId=${planId}&planName=${encodeURIComponent(planName)}&billingCycle=monthly&returnUrl=${encodeURIComponent(currentOriginUrl)}`,
+        successUrl: `${hubBase}/payment/success?targetApp=studio&planId=${planId}&planName=${encodeURIComponent(planName)}&billingCycle=monthly&uid=${encodeURIComponent(user.uid)}&returnUrl=${encodeURIComponent(currentOriginUrl)}`,
         failUrl: `${hubBase}/payment/fail?returnUrl=${encodeURIComponent(currentOriginUrl)}`,
       });
     } catch (err) {
