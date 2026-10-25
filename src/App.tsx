@@ -11,7 +11,7 @@ import { PanelLeft, Music, Settings, X, WifiOff, Library, Layout, RotateCcw, Hel
 import { motion, AnimatePresence } from 'framer-motion';
 import { initGoogleApi, IS_LOCAL_DEV } from './api/gdriveWebService';
 import { auth } from './api/firebaseConfig';
-import { startKakaoLogin, startNaverLogin, processOAuthCallback, syncUserWithHub, getSocialUserMeta } from './utils/socialAuth';
+import { startKakaoLogin, startNaverLogin, processOAuthCallback, syncUserWithHub, getSocialUserMeta, getHubAppPlan } from './utils/socialAuth';
 import { logActivity } from './utils/logger';
 import { ClaudeAuthPage } from './components/ClaudeAuthPage';
 import { InviteBonusModal } from './components/InviteBonusModal';
@@ -197,6 +197,32 @@ const MainApp: React.FC = () => {
           logActivity('로그인');
         }
         syncUserWithHub(user, 'studio').catch(() => {});
+
+        // ─── [Self-Healing] 중앙 인증 허브(authDb)의 최신 플랜을 로컬 DB(ccm-ymoonsik)에 자가 치유 동기화 ───
+        getHubAppPlan(user.uid, 'studio').then((hubPlan) => {
+          if (hubPlan) {
+            import('firebase/firestore').then(({ doc, getDoc, setDoc }) => {
+              import('./api/firebaseConfig').then(({ db }) => {
+                const now = Date.now();
+                const exp = Number(hubPlan.expiresAt || 0);
+                const isExpired = exp > 0 && now > exp;
+                const targetPlan = isExpired ? 'free' : (hubPlan.planId || (hubPlan.isPro ? 'pro' : 'free'));
+                const userRef = doc(db, 'users', user.uid);
+                getDoc(userRef).then((uSnap) => {
+                  const currentPlan = uSnap.data()?.plan;
+                  if (currentPlan !== targetPlan) {
+                    setDoc(userRef, {
+                      plan: targetPlan,
+                      updatedAt: Date.now(),
+                    }, { merge: true }).then(() => {
+                      console.log(`[Self-Healing] Studio plan synced from Hub: ${targetPlan} (만료여부: ${isExpired})`);
+                    }).catch(console.warn);
+                  }
+                }).catch(console.warn);
+              });
+            });
+          }
+        }).catch((healErr) => console.warn('[Self-Healing] Studio plan sync non-fatal:', healErr));
       }
     });
 

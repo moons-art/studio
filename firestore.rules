@@ -1,6 +1,19 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // 1. 공통 약관 및 사이트 정책 (누구나 읽기만 가능, 쓰기 전면 차단)
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // 2. 시스템 활동 로그 (쓰기만 가능, 열람 및 변조 차단)
+    match /activity_logs/{logId} {
+      allow create: if true;
+      allow read, update, delete: if false;
+    }
+
+    // 3. 찬양 악보, 콘티, 팀원 데이터 (기존 클라이언트 호환 유지)
     match /{document=**} {
       allow read, write: if true;
     }
