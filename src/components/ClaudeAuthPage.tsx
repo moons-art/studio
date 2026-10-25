@@ -14,7 +14,9 @@ import {
 } from 'lucide-react';
 import { type User } from 'firebase/auth';
 import { auth } from '../api/firebaseConfig';
-import { startKakaoLogin, startNaverLogin, getRecentLoginProvider } from '../utils/socialAuth';
+import { startKakaoLogin, startNaverLogin, processUniversalPayment, requestTossPayment } from '../utils/socialAuth';
+import { doc, setDoc } from 'firebase/firestore';
+import { db } from '../api/firebaseConfig';
 import { PolicyViewModal, type PolicyModalType } from './PolicyViewModal';
 
 export interface ClaudeAuthPageProps {
@@ -195,14 +197,55 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
     }
   };
 
-  // 플랜 액션 핸들러 (구글 연동 강제 없이 바로 결제/상담으로 진행)
+  // 플랜 선택 및 결제 모듈 연동 핸들러
   const handlePlanAction = async (planName: string, isFreePlan = false) => {
+    const user = auth.currentUser;
+    if (!user) {
+      alert(`${planName} 이용을 위해 먼저 로그인을 진행해주세요.\n상단 로그인 화면으로 이동합니다.`);
+      loginSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+
     if (isFreePlan) {
       onClose();
       return;
     }
-    proceedPayment(planName);
+
+    let planId = 'solo';
+    let amount = 3900;
+    if (planName.includes('TEAM') || planName.includes('팀')) {
+      planId = 'team';
+      amount = 9900;
+    }
+
+    const orderId = `ord_studio_${Date.now()}`;
+    const isLocal = window.location.hostname.includes('localhost');
+    const hubBase = isLocal ? 'http://localhost:5173' : 'https://sermon.thenations.kr';
+    const currentOriginUrl = window.location.origin + window.location.pathname;
+
+    sessionStorage.setItem('pending_pay_target_app', 'studio');
+    sessionStorage.setItem('pending_pay_plan_id', planId);
+    sessionStorage.setItem('pending_pay_plan_name', planName);
+    sessionStorage.setItem('pending_pay_cycle', 'monthly');
+    sessionStorage.setItem('pending_pay_uid', user.uid);
+    sessionStorage.setItem('pending_pay_return_url', currentOriginUrl);
+
+    try {
+      await requestTossPayment({
+        method: '카드',
+        amount,
+        orderId,
+        orderName: `[Nations Studio] ${planName} (월간 구독)`,
+        customerName: user.displayName || '스튜디오 회원',
+        customerEmail: user.email || undefined,
+        successUrl: `${hubBase}/payment/success?targetApp=studio&planId=${planId}&planName=${encodeURIComponent(planName)}&billingCycle=monthly&returnUrl=${encodeURIComponent(currentOriginUrl)}`,
+        failUrl: `${hubBase}/payment/fail?returnUrl=${encodeURIComponent(currentOriginUrl)}`,
+      });
+    } catch (err) {
+      console.warn('[ClaudeAuthPage] Toss payment cancelled or error:', err);
+    }
   };
+
 
   const proceedPayment = (planName: string) => {
     const kakaoUrl = 'http://pf.kakao.com/_cxjBxaX/chat';

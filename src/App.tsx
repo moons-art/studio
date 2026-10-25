@@ -143,6 +143,32 @@ const MainApp: React.FC = () => {
       console.warn('[App] processOAuthCallback warning:', err);
     });
 
+    // 토스페이먼츠 결제 승인 완료 후 복귀 감지 (?payment=success)
+    if (typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search);
+      if (sp.get('payment') === 'success') {
+        const plan = sp.get('plan') || 'solo';
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete('payment');
+        cleanUrl.searchParams.delete('plan');
+        cleanUrl.searchParams.delete('orderId');
+        window.history.replaceState({}, '', cleanUrl.toString());
+
+        const user = auth.currentUser;
+        if (user) {
+          import('firebase/firestore').then(({ doc, setDoc }) => {
+            import('./api/firebaseConfig').then(({ db }) => {
+              setDoc(doc(db, 'users', user.uid), {
+                plan,
+                subscribedAt: Date.now(),
+              }, { merge: true }).catch(console.warn);
+            });
+          });
+        }
+        alert(`🎉 결제가 성공적으로 승인되었습니다!\n[${plan.toUpperCase()}] 플랜 권한이 즉시 적용되었습니다.`);
+      }
+    }
+
     const unsubAuth = auth.onAuthStateChanged((user) => {
       if (user) {
         const socialMeta = getSocialUserMeta(user);
