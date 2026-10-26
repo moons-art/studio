@@ -219,11 +219,21 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
     }
 
     let planId = 'solo';
-    let amount = 3900;
+    let amount = 4900;
     if (planName.includes('TEAM') || planName.includes('팀')) {
       planId = 'team';
       amount = 9900;
+    } else if (planName.includes('클라우드') || planName.includes('악보 1000')) {
+      planId = 'storage_1000';
+      amount = 3000;
+    } else if (planName.includes('AI') || planName.includes('크레딧')) {
+      planId = 'ai_credit_100';
+      amount = 5000;
     }
+
+    const isOneTime = planId === 'ai_credit_100';
+    const cycle = isOneTime ? 'onetime' : 'monthly';
+    const billingText = isOneTime ? '(단회 결제)' : '(월간 구독)';
 
     const orderId = `ord_studio_${Date.now()}`;
     const isLocal = window.location.hostname.includes('localhost') || window.location.hostname === '127.0.0.1';
@@ -233,7 +243,7 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
     sessionStorage.setItem('pending_pay_target_app', 'studio');
     sessionStorage.setItem('pending_pay_plan_id', planId);
     sessionStorage.setItem('pending_pay_plan_name', planName);
-    sessionStorage.setItem('pending_pay_cycle', 'monthly');
+    sessionStorage.setItem('pending_pay_cycle', cycle);
     sessionStorage.setItem('pending_pay_uid', user.uid);
     sessionStorage.setItem('pending_pay_return_url', currentOriginUrl);
 
@@ -242,10 +252,10 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
         method: '카드',
         amount,
         orderId,
-        orderName: `[Nations Studio] ${planName} (월간 구독)`,
+        orderName: `[Nations Studio] ${planName} ${billingText}`,
         customerName: user.displayName || '스튜디오 회원',
         customerEmail: user.email || undefined,
-        successUrl: `${hubBase}/payment/success?targetApp=studio&planId=${planId}&planName=${encodeURIComponent(planName)}&billingCycle=monthly&uid=${encodeURIComponent(user.uid)}&returnUrl=${encodeURIComponent(currentOriginUrl)}`,
+        successUrl: `${hubBase}/payment/success?targetApp=studio&planId=${planId}&planName=${encodeURIComponent(planName)}&billingCycle=${cycle}&uid=${encodeURIComponent(user.uid)}&returnUrl=${encodeURIComponent(currentOriginUrl)}`,
         failUrl: `${hubBase}/payment/fail?returnUrl=${encodeURIComponent(currentOriginUrl)}`,
       });
     } catch (err) {
@@ -630,11 +640,15 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
                   <ul className="text-xs text-[#6E6A63] space-y-2.5">
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#8C877D] shrink-0 mt-0.5" />
-                      <span>기본 앨범 1개, 콘티 1개 제공</span>
+                      <span>클라우드 서버 저장(악보 100장)</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#8C877D] shrink-0 mt-0.5" />
-                      <span>악보 최대 200장 클라우드 저장</span>
+                      <span className="font-semibold text-[#1A1918]">AI 악보분석 크레딧 5개 제공</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-[#8C877D] shrink-0 mt-0.5" />
+                      <span>기본 앨범 1개, 콘티 1개 제공</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#8C877D] shrink-0 mt-0.5" />
@@ -687,6 +701,10 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
                       <span>클라우드 서버 저장(악보 1000장)</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
+                      <span className="font-semibold text-[#C46A40]">AI 악보분석 크레딧 30개 제공</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
@@ -751,26 +769,120 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
                       <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
                       <span>악보 클라우드 서버 저장(악보 2000장)</span>
                     </li>
+                    <li className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
+                      <span className="font-semibold text-[#C46A40]">AI 악보분석 크레딧 100개 제공</span>
+                    </li>
                   </ul>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* 용량 추가 옵션 안내 바 */}
-          <div className="mt-8 bg-white border border-[#E8E5DE] rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-3 max-w-5xl mx-auto shadow-2xs">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-xl bg-[#FAF0EB] border border-[#F1D3C6] flex items-center justify-center text-[#DA7756] shrink-0">
-                <Music className="w-4 h-4" />
-              </div>
+          {/* 추가 옵션 요금제: 클라우드 요금제 & AI 크레딧 요금제 */}
+          <div className="mt-12 max-w-5xl mx-auto">
+            <div className="mb-5 flex flex-col sm:flex-row sm:items-end justify-between gap-2">
               <div>
-                <span className="text-xs sm:text-sm font-bold text-[#1A1918]">악보 용량 추가 구매 옵션</span>
-                <p className="text-[11px] sm:text-xs text-[#6E6A63] mt-0.5">악보가 더 필요하신가요? 1,000장당 월 +1,000원으로 언제든 넉넉하게 확장 가능합니다.</p>
+                <h3 className="text-lg sm:text-xl font-serif font-bold text-[#1A1918]">
+                  추가 옵션 요금제
+                </h3>
+                <p className="text-xs text-[#8C877D] mt-0.5">
+                  필요에 따라 악보 저장 용량이나 AI 분석 크레딧을 자유롭게 추가하여 사용하세요.
+                </p>
               </div>
+              <span className="text-[11px] text-[#DA7756] font-semibold bg-[#FAF0EB] px-2.5 py-1 rounded-full border border-[#F1D3C6] self-start sm:self-auto">
+                언제든 충전 가능
+              </span>
             </div>
-            <div className="flex items-baseline gap-1 shrink-0 font-semibold text-xs text-[#2C2B29] bg-[#F5F2EB] px-3.5 py-2 rounded-xl">
-              <span className="font-serif font-bold text-sm text-[#C46A40]">+₩1,000</span>
-              <span className="text-[#8C877D]">/ 1,000장당 (월)</span>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {/* 1. 클라우드 요금제 (악보 1000) */}
+              <div className="bg-white border border-[#E8E5DE] rounded-3xl p-6 sm:p-7 flex flex-col justify-between shadow-2xs hover:shadow-xs transition-shadow">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] font-bold text-[#5A564F] uppercase tracking-wider bg-[#F5F3ED] px-2.5 py-0.5 rounded-full">
+                      클라우드 요금제
+                    </span>
+                    <span className="text-xs text-[#8C877D]">매월 정기결제</span>
+                  </div>
+                  <h4 className="text-xl font-bold text-[#1A1918] mb-1">악보 1000</h4>
+                  <p className="text-xs text-[#8C877D] mb-4">
+                    악보가 더 필요한 찬양팀을 위한 대용량 추가 저장 옵션
+                  </p>
+
+                  <div className="flex items-baseline gap-1.5 mb-5 pb-4 border-b border-[#EFECE6]">
+                    <span className="text-3xl font-serif font-bold text-[#2C2B29]">₩3,000</span>
+                    <span className="text-xs text-[#8C877D]">/ 월</span>
+                    <span className="text-xs text-[#DA7756] font-medium ml-2">(매월 3천원)</span>
+                  </div>
+
+                  <ul className="text-xs text-[#6E6A63] space-y-2.5 mb-6">
+                    <li className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
+                      <span><strong>악보 1000개 저장</strong> (네이션스 클라우드 안전 보관)</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
+                      <span>기존 이용 플랜에 1000곡 용량 즉시 추가 누적</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
+                      <span>위약금 없이 언제든 자유롭게 변경 및 해지 가능</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <button
+                  onClick={() => handlePlanAction('클라우드 요금제 (악보 1000)')}
+                  className="w-full py-2.5 px-4 bg-[#2C2B29] hover:bg-[#1A1918] text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+                >
+                  악보 1000 추가 신청하기
+                </button>
+              </div>
+
+              {/* 2. AI 크레딧 요금제 */}
+              <div className="bg-white border-2 border-[#D97757]/40 rounded-3xl p-6 sm:p-7 flex flex-col justify-between shadow-2xs hover:shadow-xs transition-shadow">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] font-bold text-[#C46A40] uppercase tracking-wider bg-[#FAF0EB] px-2.5 py-0.5 rounded-full border border-[#F1D3C6]">
+                      AI 크레딧 요금제
+                    </span>
+                    <span className="text-xs text-[#C46A40] font-semibold">단회 결제 충전</span>
+                  </div>
+                  <h4 className="text-xl font-bold text-[#1A1918] mb-1">AI 분석 100회</h4>
+                  <p className="text-xs text-[#8C877D] mb-4">
+                    AI 악보 인식, 가사/코드 자동 추출, 스마트 송폼 빌더
+                  </p>
+
+                  <div className="flex items-baseline gap-1.5 mb-5 pb-4 border-b border-[#EFECE6]">
+                    <span className="text-3xl font-serif font-bold text-[#C46A40]">₩5,000</span>
+                    <span className="text-xs text-[#8C877D]">/ 100회</span>
+                    <span className="text-xs text-[#DA7756] font-medium ml-2">(단회 5천원 결제)</span>
+                  </div>
+
+                  <ul className="text-xs text-[#6E6A63] space-y-2.5 mb-6">
+                    <li className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
+                      <span><strong>AI 분석 100회</strong> 즉시 충전</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
+                      <span><strong>이용 기간: 결제 후 365일</strong> (1년 동안 자유롭게 사용)</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
+                      <span>악보 이미지에서 가사·코드 인식 및 자동 송폼 생성</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <button
+                  onClick={() => handlePlanAction('AI 크레딧 요금제 (100회)')}
+                  className="w-full py-2.5 px-4 bg-[#C46A40] hover:bg-[#A8532D] text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+                >
+                  AI 분석 100회 충전하기
+                </button>
+              </div>
             </div>
           </div>
 

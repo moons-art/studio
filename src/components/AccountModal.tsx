@@ -91,9 +91,10 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   const songCount = songs.filter(s => s.albumId !== 'hymnal').length;
   const contiCount = savedContis.length;
 
-  // 플랜별 제한 한도 (Free: 200곡, SOLO: 1,000곡, TEAM: 2,000곡)
+  // 플랜별 제한 한도 (Free: 100장, SOLO: 1,000장, TEAM: 2,000장)
   const albumLimit = currentPlan === 'free' ? 1 : 9999;
-  const songLimit = currentPlan === 'team' ? 2000 : currentPlan === 'solo' ? 1000 : 200;
+  const songLimit = currentPlan === 'team' ? 2000 : currentPlan === 'solo' ? 1000 : 100;
+  const aiCreditLimit = currentPlan === 'team' ? 100 : currentPlan === 'solo' ? 30 : 5;
   const contiLimit = currentPlan === 'free' ? 1 : 9999;
 
   // 가로바 프로그레스 계산 (%)
@@ -293,6 +294,22 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                   <div
                     className="h-full bg-[#1C1A18] rounded-full transition-all duration-500"
                     style={{ width: `${contiPercent}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* AI 악보분석 크레딧 가로바 */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-[#2C2B29]">AI 악보분석 크레딧</span>
+                  <span className="font-mono text-[11px] text-[#7D786F]">
+                    <strong className="text-[#DA7756] text-xs">{aiCreditLimit}회 제공</strong> ({planName})
+                  </span>
+                </div>
+                <div className="w-full h-2.5 bg-[#FAF0EB] rounded-full overflow-hidden border border-[#F1D3C6]/60">
+                  <div
+                    className="h-full bg-[#DA7756] rounded-full transition-all duration-500"
+                    style={{ width: `100%` }}
                   />
                 </div>
               </div>
