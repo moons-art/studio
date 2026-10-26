@@ -351,7 +351,7 @@ export const HymnalSidebar: React.FC = () => {
               {/* 세점 아이콘 (마우스 호버 시 이유 표시) */}
               <div 
                 className="p-1 rounded-md text-[#8C877D] hover:text-[#2B2927] transition-colors relative"
-                title="프리(Free) 플랜은 '미분류' 앨범만 이용 가능합니다. 프로/팀 플랜으로 업그레이드 시 커스텀 앨범을 무제한 생성할 수 있습니다."
+                title="Free 플랜은 기본 1개 앨범만 이용 가능합니다. SOLO / TEAM 플랜으로 업그레이드 시 앨범 라이브러리를 무제한 생성할 수 있습니다."
               >
                 <MoreVertical className="w-3.5 h-3.5" />
               </div>
@@ -360,9 +360,9 @@ export const HymnalSidebar: React.FC = () => {
             {/* 프리 사용자 안내 말풍선 (메뉴 아래쪽에 노출되도록 top-full mt-2 적용) */}
             {isFreeUser && (
               <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 hidden group-hover/addalbum:block z-50 w-56 p-2.5 bg-neutral-900 text-white text-[11px] rounded-xl shadow-xl leading-relaxed pointer-events-none animate-in fade-in zoom-in-95">
-                <p className="font-bold text-amber-300 mb-0.5">PRO 플랜 전용 기능</p>
+                <p className="font-bold text-[#E28A6D] mb-0.5">SOLO / TEAM 플랜 전용 기능</p>
                 <p className="text-neutral-300">
-                  프리 플랜은 <strong>'미분류'</strong> 앨범만 이용 가능합니다. 프로/팀 플랜 업그레이드 시 앨범을 무제한 추가할 수 있습니다.
+                  Free 플랜은 기본 앨범 1개만 이용 가능합니다. SOLO / TEAM 플랜 업그레이드 시 앨범 라이브러리를 무제한 추가할 수 있습니다.
                 </p>
               </div>
             )}

@@ -91,15 +91,15 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   const songCount = songs.filter(s => s.albumId !== 'hymnal').length;
   const contiCount = savedContis.length;
 
-  // 무료 플랜일 경우 제한
-  const albumLimit = 1;
-  const songLimit = 100;
-  const contiLimit = 1;
+  // 플랜별 제한 한도 (Free: 200곡, SOLO: 1,000곡, TEAM: 2,000곡)
+  const albumLimit = currentPlan === 'free' ? 1 : 9999;
+  const songLimit = currentPlan === 'team' ? 2000 : currentPlan === 'solo' ? 1000 : 200;
+  const contiLimit = currentPlan === 'free' ? 1 : 9999;
 
   // 가로바 프로그레스 계산 (%)
-  const albumPercent = currentPlan === 'free' ? Math.min(100, Math.round((albumCount / albumLimit) * 100)) : 100;
-  const songPercent = currentPlan === 'free' ? Math.min(100, Math.round((songCount / songLimit) * 100)) : 100;
-  const contiPercent = currentPlan === 'free' ? Math.min(100, Math.round((contiCount / contiLimit) * 100)) : 100;
+  const albumPercent = currentPlan === 'free' ? Math.min(100, Math.round((albumCount / 1) * 100)) : 100;
+  const songPercent = Math.min(100, Math.round((songCount / songLimit) * 100));
+  const contiPercent = currentPlan === 'free' ? Math.min(100, Math.round((contiCount / 1) * 100)) : 100;
 
   // 초대 링크
   const inviteCode = currentUser?.uid ? currentUser.uid.replace(/^(kakao:|naver:)/, '').slice(0, 8) : 'nations';
@@ -237,11 +237,11 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                   <span className="font-mono text-[11px] text-[#7D786F]">
                     {currentPlan === 'free' ? (
                       <>
-                        <strong className="text-[#1C1A18] text-xs">{albumCount}</strong> / {albumLimit} free
+                        <strong className="text-[#1C1A18] text-xs">{albumCount}</strong> / 1개 (Free)
                       </>
                     ) : (
                       <>
-                        <strong className="text-[#DA7756] text-xs">100%</strong> ({planName})
+                        <strong className="text-[#DA7756] text-xs">{albumCount}개</strong> (무제한 생성)
                       </>
                     )}
                   </span>
@@ -259,15 +259,10 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-semibold text-[#2C2B29]">악보 수</span>
                   <span className="font-mono text-[11px] text-[#7D786F]">
-                    {currentPlan === 'free' ? (
-                      <>
-                        <strong className="text-[#1C1A18] text-xs">{songCount}</strong> / {songLimit} free
-                      </>
-                    ) : (
-                      <>
-                        <strong className="text-[#DA7756] text-xs">100%</strong> ({planName})
-                      </>
-                    )}
+                    <strong className={currentPlan === 'free' ? 'text-[#1C1A18] text-xs' : 'text-[#DA7756] text-xs'}>
+                      {songCount}
+                    </strong>{' '}
+                    / {songLimit.toLocaleString()}곡 ({planName})
                   </span>
                 </div>
                 <div className="w-full h-2.5 bg-[#EAE6DF] rounded-full overflow-hidden">
@@ -285,11 +280,11 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                   <span className="font-mono text-[11px] text-[#7D786F]">
                     {currentPlan === 'free' ? (
                       <>
-                        <strong className="text-[#1C1A18] text-xs">{contiCount}</strong> / {contiLimit} free
+                        <strong className="text-[#1C1A18] text-xs">{contiCount}</strong> / 1개 (Free)
                       </>
                     ) : (
                       <>
-                        <strong className="text-[#DA7756] text-xs">100%</strong> ({planName})
+                        <strong className="text-[#DA7756] text-xs">{contiCount}개</strong> (무제한 저장)
                       </>
                     )}
                   </span>

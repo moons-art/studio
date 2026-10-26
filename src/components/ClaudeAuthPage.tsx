@@ -630,7 +630,11 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
                   <ul className="text-xs text-[#6E6A63] space-y-2.5">
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#8C877D] shrink-0 mt-0.5" />
-                      <span>앨범, 콘티 1개 제공</span>
+                      <span>기본 앨범 1개, 콘티 1개 제공</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-[#8C877D] shrink-0 mt-0.5" />
+                      <span>악보 최대 200장 클라우드 저장</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#8C877D] shrink-0 mt-0.5" />
@@ -642,7 +646,7 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
                     </li>
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#8C877D] shrink-0 mt-0.5" />
-                      <span>모든 기기 연동</span>
+                      <span>모든 기기 연동 (PC / 태블릿 / 모바일)</span>
                     </li>
                   </ul>
                 </div>
@@ -660,10 +664,10 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
 
                 <div className="mb-6">
                   <div className="flex items-baseline gap-1.5">
-                    <span className="text-3xl font-serif font-bold text-[#2C2B29]">₩3,900</span>
+                    <span className="text-3xl font-serif font-bold text-[#2C2B29]">₩4,900</span>
                     <span className="text-xs text-[#8C877D]">/ 월</span>
                   </div>
-                  <div className="text-xs text-[#DA7756] font-medium mt-0.5">연간 ₩39,000 (약 17% 절약)</div>
+                  <div className="text-xs text-[#DA7756] font-medium mt-0.5">연간 ₩49,000 (약 17% 절약)</div>
                 </div>
 
                 <button
@@ -678,11 +682,11 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
                   <ul className="text-xs text-[#6E6A63] space-y-2.5">
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
-                      <span>구글 드라이브 앨범 동기화</span>
+                      <span>앨범 라이브러리 추가 생성</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
-                      <span>앨범 라이브러리 기능</span>
+                      <span>클라우드 서버 저장(악보 1000장)</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
@@ -690,11 +694,11 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
                     </li>
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
-                      <span>인도자용 악보보기 기능</span>
+                      <span>찬양인도용 악보뷰어</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
-                      <span>회중용 악보보기 링크전송</span>
+                      <span>회중용 악보뷰어 링크</span>
                     </li>
                   </ul>
                 </div>
@@ -729,31 +733,44 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
                 </button>
 
                 <div className="border-t border-[#EFECE6] pt-4">
-                  <span className="text-[11px] font-bold text-[#5A564F] block mb-2.5">+ SOLO 플랜 포함된 혜택:</span>
+                  <span className="text-[11px] font-bold text-[#5A564F] block mb-2.5">SOLO 플랜 포함된 혜택 +</span>
                   <ul className="text-xs text-[#6E6A63] space-y-2.5">
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
-                      <span>찬양팀 공유기능 확장</span>
+                      <span>인도자의 콘티 공유기능</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
-                      <span>찬양팀 전용페이지</span>
+                      <span>찬양팀 협업 제공: 악보, 송폼, 코드악보, 카피곡 유튜브클립 원클릭 공유 및 수정, 톡 교제 기능</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
-                      <span>송폼, 악보, 카피곡 유튜브영상 공유</span>
+                      <span>예배중 찬양팀 악보뷰어/ 프롬프트 협주</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
-                      <span>연습중 수정기능</span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <Check className="w-4 h-4 text-[#C46A40] shrink-0 mt-0.5" />
-                      <span>찬양팀 톡 교제기능</span>
+                      <span>악보 클라우드 서버 저장(악보 2000장)</span>
                     </li>
                   </ul>
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* 용량 추가 옵션 안내 바 */}
+          <div className="mt-8 bg-white border border-[#E8E5DE] rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-3 max-w-5xl mx-auto shadow-2xs">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-[#FAF0EB] border border-[#F1D3C6] flex items-center justify-center text-[#DA7756] shrink-0">
+                <Music className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-xs sm:text-sm font-bold text-[#1A1918]">악보 용량 추가 구매 옵션</span>
+                <p className="text-[11px] sm:text-xs text-[#6E6A63] mt-0.5">악보가 더 필요하신가요? 1,000장당 월 +1,000원으로 언제든 넉넉하게 확장 가능합니다.</p>
+              </div>
+            </div>
+            <div className="flex items-baseline gap-1 shrink-0 font-semibold text-xs text-[#2C2B29] bg-[#F5F2EB] px-3.5 py-2 rounded-xl">
+              <span className="font-serif font-bold text-sm text-[#C46A40]">+₩1,000</span>
+              <span className="text-[#8C877D]">/ 1,000장당 (월)</span>
             </div>
           </div>
 
