@@ -219,7 +219,7 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
     }
 
     let planId = 'solo';
-    let amount = 4900;
+    let amount = 3900;
     if (planName.includes('TEAM') || planName.includes('팀')) {
       planId = 'team';
       amount = 9900;
@@ -678,10 +678,10 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
 
                 <div className="mb-6">
                   <div className="flex items-baseline gap-1.5">
-                    <span className="text-3xl font-serif font-bold text-[#2C2B29]">₩4,900</span>
+                    <span className="text-3xl font-serif font-bold text-[#2C2B29]">₩3,900</span>
                     <span className="text-xs text-[#8C877D]">/ 월</span>
                   </div>
-                  <div className="text-xs text-[#DA7756] font-medium mt-0.5">연간 ₩49,000 (약 17% 절약)</div>
+                  <div className="text-xs text-[#DA7756] font-medium mt-0.5">연간 ₩39,000 (약 17% 절약)</div>
                 </div>
 
                 <button
