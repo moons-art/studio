@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Shield, FileText, Building2, ExternalLink } from 'lucide-react';
+import { X, Shield, FileText, Building2, ExternalLink, RotateCcw } from 'lucide-react';
 import { getSitePolicy, type SitePolicy, DEFAULT_SITE_POLICY } from '../services/policyService';
 
-export type PolicyModalType = 'terms' | 'privacy' | 'business';
+export type PolicyModalType = 'terms' | 'privacy' | 'business' | 'refund';
 
 interface PolicyViewModalProps {
   isOpen: boolean;
@@ -47,12 +47,14 @@ export const PolicyViewModal: React.FC<PolicyViewModalProps> = ({
               <div className="w-8 h-8 rounded-xl bg-[#FAF0EB] flex items-center justify-center text-[#C46A40]">
                 {activeTab === 'terms' && <FileText className="w-4 h-4" />}
                 {activeTab === 'privacy' && <Shield className="w-4 h-4" />}
+                {activeTab === 'refund' && <RotateCcw className="w-4 h-4" />}
                 {activeTab === 'business' && <Building2 className="w-4 h-4" />}
               </div>
               <div>
                 <h2 className="text-sm sm:text-base font-bold text-[#2B2927]">
                   {activeTab === 'terms' && '서비스 이용약관'}
                   {activeTab === 'privacy' && '개인정보 처리방침'}
+                  {activeTab === 'refund' && '청약철회 및 환불규정'}
                   {activeTab === 'business' && '사업자 및 서비스 정보'}
                 </h2>
                 <p className="text-[11px] text-[#8C877D]">
@@ -93,6 +95,17 @@ export const PolicyViewModal: React.FC<PolicyViewModalProps> = ({
               <span>개인정보 처리방침</span>
             </button>
             <button
+              onClick={() => setActiveTab('refund')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === 'refund'
+                  ? 'bg-white text-[#2B2927] shadow-2xs font-semibold border border-[#E5E0D8]'
+                  : 'text-[#6E6A63] hover:text-[#2B2927] hover:bg-white/60'
+              }`}
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>청약철회 및 환불</span>
+            </button>
+            <button
               onClick={() => setActiveTab('business')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer whitespace-nowrap ${
                 activeTab === 'business'
@@ -116,6 +129,23 @@ export const PolicyViewModal: React.FC<PolicyViewModalProps> = ({
             {activeTab === 'privacy' && (
               <div className="whitespace-pre-wrap font-sans space-y-2">
                 {policy.privacyPolicy}
+              </div>
+            )}
+
+            {activeTab === 'refund' && (
+              <div className="whitespace-pre-wrap font-sans space-y-3 leading-relaxed text-[#4A463F]">
+                <h4 className="font-bold text-sm text-[#2B2927]">디지털 콘텐츠 청약철회 및 환불 규정</h4>
+                <p>본 서비스는 전자상거래 등에서의 소비자보호에 관한 법률 및 디지털 콘텐츠 관련 법령을 준수합니다.</p>
+                <div className="space-y-2 pt-1">
+                  <p className="font-semibold text-[#2B2927]">1. 정기 구독(월/연 멤버십)의 청약철회</p>
+                  <p>- 결제일로부터 7일 이내에 유료 기능을 전혀 사용하지 않은 경우 전액 환불이 가능합니다.</p>
+                  <p>- 이미 서비스 이용 이력이 있거나 7일이 경과한 경우 당월 결제 금액은 환불되지 않으며, 다음 결제 주기부터 해지됩니다.</p>
+                  <p className="font-semibold text-[#2B2927] pt-2">2. 크레딧 및 일회성 충전 상품</p>
+                  <p>- 충전 후 전혀 사용하지 않은 크레딧은 7일 이내 전액 환불 가능합니다.</p>
+                  <p>- 일부 사용된 크레딧 팩은 잔여분에 대해 위약금(환불 수수료) 공제 후 환불될 수 있습니다.</p>
+                  <p className="font-semibold text-[#2B2927] pt-2">3. 환불 신청 방법</p>
+                  <p>- 고객지원 카카오톡 채널 또는 고객센터 이메일(ymoonsik@gmail.com)로 가입 계정 이메일과 함께 신청해 주시면 영업일 기준 3일 이내 처리됩니다.</p>
+                </div>
               </div>
             )}
 
