@@ -1407,12 +1407,16 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
             </div>
           </div>
 
-          {/* 3 Core Points List - Alternating 2-Column Showcase */}
-          <div className="flex flex-col gap-6 sm:gap-8">
+          {/* 3 Core Points List - Alternating 2-Column Showcase (카드는 시각적으로 숨기고 이미지는 깊은 그림자로 강조, 좌우 여백 1.3배 확대) */}
+          {/* 이전 복구용 백업 스타일:
+              - 카드 컨테이너: className="w-full rounded-[28px] sm:rounded-[36px] p-6 sm:p-10 lg:p-12 border border-slate-200/70 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center"
+              - 이미지: className="max-w-full max-h-[260px] sm:max-h-[300px] lg:max-h-[340px] w-auto h-auto object-contain rounded-[22px] sm:rounded-[28px] shadow-md border border-slate-200/60 transition-transform duration-300 hover:scale-[1.01]"
+          */}
+          <div className="flex flex-col gap-12 sm:gap-20 max-w-6xl mx-auto w-full px-6 sm:px-10 lg:px-16">
             {/* Row 1: 매번 반복하는 작업에서 벗어나세요 */}
-            <div className="w-full bg-white rounded-[28px] sm:rounded-[36px] p-6 sm:p-10 lg:p-12 border border-slate-200/80 shadow-sm grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+            <div className="w-full py-6 sm:py-8 lg:py-10 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
               <div className="lg:col-span-6 flex flex-col justify-center">
-                <h3 className="text-[17px] sm:text-[20px] md:text-[23px] font-bold text-[#0F172A] leading-[1.3] tracking-tight break-keep-all">
+                <h3 className="text-[17px] sm:text-[20px] md:text-[23px] font-bold text-[#0F172A] leading-[1.3] tracking-tight break-keep-all whitespace-pre-line">
                   {coreCards[0]?.title || '매번 반복하는 작업에서 벗어나세요'}
                 </h3>
                 <p className="text-[13px] sm:text-[14px] text-slate-600 leading-relaxed mt-3.5 break-keep-all max-w-lg">
@@ -1421,15 +1425,15 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
               </div>
 
               <div className="lg:col-span-6 w-full flex items-center justify-center">
-                <div className="w-full max-w-[500px] h-[250px] sm:h-[290px] lg:h-[320px] rounded-[28px] sm:rounded-[36px] overflow-hidden flex items-center justify-center select-none">
+                <div className="w-full max-w-[500px] flex items-center justify-center select-none py-2">
                   {coreCards[0]?.image ? (
                     <img
                       src={coreCards[0].image}
                       alt="송폼 자동 정리 콘티 편집"
-                      className="w-full h-full object-contain rounded-[28px] sm:rounded-[36px] drop-shadow-sm transition-transform duration-300 hover:scale-[1.01]"
+                      className="max-w-full max-h-[270px] sm:max-h-[310px] lg:max-h-[350px] w-auto h-auto object-contain rounded-[22px] sm:rounded-[28px] shadow-[0_20px_50px_rgba(15,23,42,0.16),0_6px_16px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/10 border border-white/80 hover:-translate-y-1 hover:shadow-[0_25px_60px_rgba(15,23,42,0.22)] transition-all duration-300"
                     />
                   ) : (
-                    <div className="w-full h-full rounded-[28px] sm:rounded-[36px] border-2 border-dashed border-slate-300/70 flex flex-col items-center justify-center text-slate-400 gap-2 p-4">
+                    <div className="w-full h-[240px] sm:h-[280px] lg:h-[320px] rounded-[22px] sm:rounded-[28px] border-2 border-dashed border-slate-300/70 flex flex-col items-center justify-center text-slate-400 gap-2 p-4">
                       <span className="text-3xl opacity-35">🎵</span>
                       <span className="text-[12px] font-medium text-slate-500/70 tracking-tight">
                         이미지 등록 대기 중
@@ -1441,17 +1445,17 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
             </div>
 
             {/* Row 2: 찬양팀 페이지로 함께 공유해요. (Alternating) */}
-            <div className="w-full bg-white rounded-[28px] sm:rounded-[36px] p-6 sm:p-10 lg:p-12 border border-slate-200/80 shadow-sm grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+            <div className="w-full py-6 sm:py-8 lg:py-10 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
               <div className="order-last lg:order-first lg:col-span-6 w-full flex items-center justify-center">
-                <div className="w-full max-w-[500px] h-[250px] sm:h-[290px] lg:h-[320px] rounded-[28px] sm:rounded-[36px] overflow-hidden flex items-center justify-center select-none">
+                <div className="w-full max-w-[500px] flex items-center justify-center select-none py-2">
                   {coreCards[1]?.image ? (
                     <img
                       src={coreCards[1].image}
                       alt="찬양팀 실시간 동기화 마스터뷰"
-                      className="w-full h-full object-contain rounded-[28px] sm:rounded-[36px] drop-shadow-sm transition-transform duration-300 hover:scale-[1.01]"
+                      className="max-w-full max-h-[270px] sm:max-h-[310px] lg:max-h-[350px] w-auto h-auto object-contain rounded-[22px] sm:rounded-[28px] shadow-[0_20px_50px_rgba(15,23,42,0.16),0_6px_16px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/10 border border-white/80 hover:-translate-y-1 hover:shadow-[0_25px_60px_rgba(15,23,42,0.22)] transition-all duration-300"
                     />
                   ) : (
-                    <div className="w-full h-full rounded-[28px] sm:rounded-[36px] border-2 border-dashed border-slate-300/70 flex flex-col items-center justify-center text-slate-400 gap-2 p-4">
+                    <div className="w-full h-[240px] sm:h-[280px] lg:h-[320px] rounded-[22px] sm:rounded-[28px] border-2 border-dashed border-slate-300/70 flex flex-col items-center justify-center text-slate-400 gap-2 p-4">
                       <span className="text-3xl opacity-35">👥</span>
                       <span className="text-[12px] font-medium text-slate-500/70 tracking-tight">
                         이미지 등록 대기 중
@@ -1472,7 +1476,7 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
             </div>
 
             {/* Row 3: 누구나 악보를 볼수있어요. */}
-            <div className="w-full bg-white rounded-[28px] sm:rounded-[36px] p-6 sm:p-10 lg:p-12 border border-slate-200/80 shadow-sm grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+            <div className="w-full py-6 sm:py-8 lg:py-10 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
               <div className="lg:col-span-6 flex flex-col justify-center">
                 <h3 className="text-[17px] sm:text-[20px] md:text-[23px] font-bold text-[#0F172A] leading-[1.3] tracking-tight break-keep-all whitespace-pre-line">
                   {coreCards[2]?.title || '누구나 악보를 볼수있어요.'}
@@ -1483,15 +1487,15 @@ export const ClaudeAuthPage: React.FC<ClaudeAuthPageProps> = ({
               </div>
 
               <div className="lg:col-span-6 w-full flex items-center justify-center">
-                <div className="w-full max-w-[500px] h-[250px] sm:h-[290px] lg:h-[320px] rounded-[28px] sm:rounded-[36px] overflow-hidden flex items-center justify-center select-none">
+                <div className="w-full max-w-[500px] flex items-center justify-center select-none py-2">
                   {coreCards[2]?.image ? (
                     <img
                       src={coreCards[2].image}
                       alt="스마트 조옮김 키 변환"
-                      className="w-full h-full object-contain rounded-[28px] sm:rounded-[36px] drop-shadow-sm transition-transform duration-300 hover:scale-[1.01]"
+                      className="max-w-full max-h-[270px] sm:max-h-[310px] lg:max-h-[350px] w-auto h-auto object-contain rounded-[22px] sm:rounded-[28px] shadow-[0_20px_50px_rgba(15,23,42,0.16),0_6px_16px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/10 border border-white/80 hover:-translate-y-1 hover:shadow-[0_25px_60px_rgba(15,23,42,0.22)] transition-all duration-300"
                     />
                   ) : (
-                    <div className="w-full h-full rounded-[28px] sm:rounded-[36px] border-2 border-dashed border-slate-300/70 flex flex-col items-center justify-center text-slate-400 gap-2 p-4">
+                    <div className="w-full h-[240px] sm:h-[280px] lg:h-[320px] rounded-[22px] sm:rounded-[28px] border-2 border-dashed border-slate-300/70 flex flex-col items-center justify-center text-slate-400 gap-2 p-4">
                       <span className="text-3xl opacity-35">🎼</span>
                       <span className="text-[12px] font-medium text-slate-500/70 tracking-tight">
                         이미지 등록 대기 중
