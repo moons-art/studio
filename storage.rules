@@ -1,8 +1,23 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    // 1. 악보 및 앨범 이미지 저장소 (MIME 타입 및 용량 엄격 제한)
+    match /sheets/{userId}/{allPaths=**} {
+      // 악보 및 콘티 열람 (인도자, 팀원, 회중 뷰어 공용)
+      allow read: if true;
+
+      // 업로드 보안 조건:
+      // - 최대 25MB 이하
+      // - 안전한 악보 이미지 및 PDF 문서 파일만 허용 (실행 파일 및 악성 웹셸 원천 차단)
+      allow write: if request.resource.size < 25 * 1024 * 1024
+                   && (request.resource.contentType.matches('image/.*')
+                       || request.resource.contentType == 'application/pdf');
+    }
+
+    // 2. 그 외 미허가 경로에 대한 임의 쓰기 차단
     match /{allPaths=**} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if false;
     }
   }
 }

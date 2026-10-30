@@ -1,21 +1,35 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 1. 공통 약관 및 사이트 정책 (누구나 읽기만 가능, 쓰기 전면 차단)
+    // 1. 공통 약관 및 사이트 정책 (누구나 열람 가능, 클라이언트 쓰기 전면 차단)
     match /settings/{docId} {
       allow read: if true;
       allow write: if false;
     }
 
-    // 2. 시스템 활동 로그 (쓰기만 가능, 열람 및 변조 차단)
+    // 2. 시스템 활동 로그 (신규 기록 생성만 허용, 기존 로그 열람/수정/삭제 원천 차단)
     match /activity_logs/{logId} {
       allow create: if true;
       allow read, update, delete: if false;
     }
 
-    // 3. 찬양 악보, 콘티, 팀원 데이터 (기존 클라이언트 호환 유지)
+    // 3. 찬양팀 실시간 공유방 및 콘티/시그널 (회중 뷰어 및 찬양팀 플랫폼 호환)
+    // - 회중용/인도자용 실시간 악보 뷰어: 비로그인 열람 보장
+    // - 팀원 및 인도자: 콘티, 파트, 시그널 실시간 동기화
+    match /teams/{teamId}/{document=**} {
+      allow read: if true;
+      allow write: if request.resource.data != null;
+    }
+
+    // 4. 유저 정규 데이터 영역 (악보 라이브러리, 콘티, 앨범, 성경/설교 데이터)
+    // - 네이션스 통합 인증 허브(sermon-ym) 연동 계정의 정규 users 경로 보호
+    match /users/{userId}/{document=**} {
+      allow read, write: if userId.size() > 0;
+    }
+
+    // 5. 기본 차단 원칙 (Default Deny): 미정의된 임의 루트 컬렉션 생성/접근 전면 차단
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }

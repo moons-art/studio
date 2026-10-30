@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import type { SongFormBlock } from '../../types/hymnal';
 import { 
   SONG_FORM_PART_TYPES, 
@@ -18,8 +18,12 @@ import {
   ChevronDown
 } from 'lucide-react';
 
-interface SongFormBuilderProps {
-  title: string;
+export interface SongFormBuilderHandle {
+  save: () => Promise<void>;
+}
+
+export interface SongFormBuilderProps {
+  title?: string;
   songKey?: string;
   meter?: string;
   rhythm?: string;
@@ -36,6 +40,7 @@ interface SongFormBuilderProps {
     bpm?: number;
     songFormText: string;
   }) => Promise<void> | void;
+  onSaved?: () => void;
   onLaunchPrompter?: (data: {
     blocks: SongFormBlock[];
     code?: string;
@@ -87,23 +92,31 @@ const initializeBlocksWithMemo = (rawBlocks: SongFormBlock[], rawText?: string):
   return updated;
 };
 
-export const SongFormBuilder: React.FC<SongFormBuilderProps> = ({
-  title,
-  songKey = 'C',
-  meter = '4/4',
-  rhythm = '',
-  bpm = 72,
-  initialText = '',
-  initialBlocks,
-  initialSongFormText,
-  onSave,
-  isSaving = false,
-}) => {
+export const SongFormBuilder = forwardRef<SongFormBuilderHandle, SongFormBuilderProps>(function SongFormBuilder(
+  {
+    title,
+    songKey = 'C',
+    meter = '4/4',
+    rhythm = '',
+    bpm = 72,
+    initialText = '',
+    initialBlocks,
+    initialSongFormText,
+    onSave,
+    onSaved,
+    onLaunchPrompter,
+    isSaving = false,
+  },
+  ref
+) {
   // 최상단 메타 정보 (코드, 박자, 리듬, BPM)
   const [codeValue, setCodeValue] = useState(songKey || '');
   const [meterValue, setMeterValue] = useState(meter || '4/4');
   const [rhythmValue, setRhythmValue] = useState(rhythm || '');
   const [bpmValue, setBpmValue] = useState<number>(bpm || 72);
+
+  // 파트 딱지 토글 상태
+  const [showPartPalette, setShowPartPalette] = useState(false);
 
   // 송폼 카드 블록 리스트
   const [blocks, setBlocks] = useState<SongFormBlock[]>(() => {
@@ -344,6 +357,11 @@ export const SongFormBuilder: React.FC<SongFormBuilderProps> = ({
     setTimeout(() => setFlowSavedNotice(false), 2000);
   };
 
+  // 상단 저장 버튼 등 외부에서 호출할 수 있도록 imperative handle 노출
+  useImperativeHandle(ref, () => ({
+    save: handleSave,
+  }));
+
   // 전체 송폼 저장 실행
   const handleSave = async () => {
     const textSummary = formatSongFormBlocksToText(blocks);
@@ -367,51 +385,17 @@ export const SongFormBuilder: React.FC<SongFormBuilderProps> = ({
       songFormText: combinedMemos,
     });
     setSavedNotice(true);
+    onSaved?.();
     setTimeout(() => setSavedNotice(false), 2000);
   };
 
   return (
     <div className="flex flex-col h-full bg-[#FAF9F5] text-[#2C2B29] select-none overflow-hidden font-sans">
-      {/* 1. 상단 메뉴줄: 곡명, KEY뱃지, 전체 저장 버튼 */}
-      <div className="px-3 py-2 bg-[#FAF9F5] border-b border-[#E7E5DF] flex flex-col gap-1.5 shrink-0">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center min-w-0">
-            <h3 className="text-base sm:text-lg font-bold text-[#18181B] tracking-tight truncate">
-              {title}
-            </h3>
-          </div>
-
+      {/* 1. 상단 메뉴박스: 코드/박자/리듬/BPM 및 진행(흐름)을 한 메뉴박스에 집어넣어 여백 완전 제거 */}
+      <div className="p-2.5 bg-[#FAF9F5] border-b border-[#E7E5DF] flex flex-col gap-2 shrink-0">
+        {/* 1행: 코드, 박자, 리듬, BPM - 한 줄 정렬 */}
+        <div className="flex items-center gap-2 text-xs flex-wrap">
           <div className="flex items-center gap-1.5 shrink-0">
-            {/* 전체 저장 버튼 */}
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={isSaving}
-              className={`flex items-center gap-1 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer shadow-2xs ${
-                savedNotice
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-white hover:bg-[#FAF0EB] text-[#2C2B29] hover:text-[#C96442] border border-[#E7E5DF] hover:border-[#F1D3C6] active:scale-95'
-              }`}
-              title="송폼 구성 및 메모 저장"
-            >
-              {savedNotice ? (
-                <>
-                  <Check className="w-3.5 h-3.5 stroke-[2.5px]" />
-                  <span className="text-[11px]">저장됨</span>
-                </>
-              ) : (
-                <>
-                  <Save className="w-3.5 h-3.5 stroke-[2px]" />
-                  <span className="text-[11px]">{isSaving ? '저장중' : '저장'}</span>
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* 2. 코드, 박자, 리듬, BPM 4대 메타 정보 - 모두 검은색 글자 크기 및 위치 정렬 */}
-        <div className="flex items-center gap-3 pt-0.5 text-xs flex-wrap">
-          <div className="flex items-center gap-1.5">
             <span className="text-xs font-bold text-[#18181B] shrink-0">코드:</span>
             <input
               type="text"
@@ -423,7 +407,7 @@ export const SongFormBuilder: React.FC<SongFormBuilderProps> = ({
             />
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 shrink-0">
             <span className="text-xs font-bold text-[#18181B] shrink-0">박자:</span>
             <input
               type="text"
@@ -447,7 +431,7 @@ export const SongFormBuilder: React.FC<SongFormBuilderProps> = ({
             />
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 shrink-0">
             <span className="text-xs font-bold text-[#18181B] shrink-0">BPM:</span>
             <input
               type="number"
@@ -459,78 +443,105 @@ export const SongFormBuilder: React.FC<SongFormBuilderProps> = ({
             />
           </div>
         </div>
-      </div>
 
-      {/* 3. 상단 송폼카드 추가 버튼들 */}
-      <div className="px-3 py-2 bg-[#FAF9F5] border-b border-[#E7E5DF] flex flex-wrap gap-1 items-center shrink-0">
-        <span className="text-[10px] font-mono font-bold text-[#8C877D] shrink-0 mr-1">+ 추가:</span>
-        {SONG_FORM_PART_TYPES.map((part) => (
+        {/* 2행: 진행(흐름) - 상단 메뉴박스에 쏙 집어넣어 여백 제거 */}
+        <div className="flex items-center gap-2 bg-white px-2.5 py-1 rounded-lg border border-[#E7E5DF] shadow-2xs">
+          <span className="text-[11px] font-mono text-[#8C877D] font-bold shrink-0">
+            진행:
+          </span>
+          <input
+            type="text"
+            value={flowText}
+            onFocus={() => setIsEditingFlowText(true)}
+            onChange={(e) => {
+              setIsEditingFlowText(true);
+              setFlowText(e.target.value);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                handleSaveFlowText();
+              }
+            }}
+            placeholder="예: In(4) - V1(8) - PC(4) - C(8) x2 - Out(4)"
+            className="flex-1 min-w-0 bg-transparent text-xs font-mono font-bold text-[#C96442] px-1 py-0.5 focus:outline-none"
+            title="흐름을 직접 수정하거나 자동으로 생성된 순서를 확인하세요"
+          />
           <button
-            key={part.full}
             type="button"
-            onClick={() => handleAddBlock(part.full)}
-            className="px-2 py-0.5 bg-white hover:bg-[#FAF0EB] active:bg-[#18181B] text-[#4A4741] hover:text-[#C96442] active:text-white rounded-md text-[11px] font-bold transition-all border border-[#E7E5DF] hover:border-[#F1D3C6] shrink-0 cursor-pointer shadow-2xs"
-            title={`${part.full} 카드 추가`}
+            onClick={handleSaveFlowText}
+            disabled={isSaving}
+            className={`flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded-md transition-all cursor-pointer shadow-2xs shrink-0 ${
+              flowSavedNotice
+                ? 'bg-emerald-600 text-white'
+                : 'bg-[#18181B] hover:bg-[#27272A] text-white active:scale-95'
+            }`}
+            title="진행 텍스트 적용 및 저장"
           >
-            +{part.full}
+            {flowSavedNotice ? (
+              <>
+                <Check className="w-3 h-3 stroke-[2.5px]" />
+                <span>적용됨</span>
+              </>
+            ) : (
+              <span>적용</span>
+            )}
           </button>
-        ))}
+        </div>
       </div>
 
-      {/* 4. 본문 영역: 최상단 흐름(Flow) 입력+저장창 & 가로 와이드 3단 송폼 카드들 */}
+      {/* 2. 송폼딱지들 토글 바: 토글로 만들어 아래로 펼쳐지고 스크롤되도록 지원 */}
+      <div className="bg-[#FAF9F5] border-b border-[#E7E5DF] shrink-0">
+        <button
+          type="button"
+          onClick={() => setShowPartPalette(!showPartPalette)}
+          className="w-full px-3 py-1.5 flex items-center justify-between text-xs font-bold text-[#4A4741] hover:text-[#C96442] hover:bg-[#F3EFEA] transition-colors cursor-pointer select-none"
+        >
+          <div className="flex items-center gap-1.5">
+            <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-[#FAF0EB] text-[#C96442] font-mono font-black text-xs">
+              +
+            </span>
+            <span>파트 추가 딱지</span>
+            <span className="text-[10px] text-[#A3A19B] font-normal">
+              ({SONG_FORM_PART_TYPES.length}개 파트)
+            </span>
+          </div>
+          <div className="flex items-center gap-1 text-[11px] font-medium text-[#8C877D]">
+            {showPartPalette ? (
+              <>
+                <span>접기</span>
+                <ChevronUp className="w-3.5 h-3.5" />
+              </>
+            ) : (
+              <>
+                <span>딱지 펼치기</span>
+                <ChevronDown className="w-3.5 h-3.5" />
+              </>
+            )}
+          </div>
+        </button>
+
+        {showPartPalette && (
+          <div className="px-3 py-2 bg-[#F3EFEA] border-t border-[#E7E5DF] max-h-28 overflow-y-auto custom-scrollbar flex flex-wrap gap-1.5 items-center animate-in fade-in duration-150">
+            {SONG_FORM_PART_TYPES.map((part) => (
+              <button
+                key={part.full}
+                type="button"
+                onClick={() => handleAddBlock(part.full)}
+                className="px-2.5 py-1 bg-white hover:bg-[#FAF0EB] active:bg-[#18181B] text-[#4A4741] hover:text-[#C96442] active:text-white rounded-lg text-[11px] font-bold transition-all border border-[#E7E5DF] hover:border-[#F1D3C6] shrink-0 cursor-pointer shadow-2xs"
+                title={`${part.full} 카드 추가`}
+              >
+                +{part.full}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 3. 본문 영역: 가로 와이드 3단 송폼 카드들 (기존의 여백 많은 흐름 박스는 상단 메뉴로 이전되어 여백 없음) */}
       <div 
         ref={cardListRef}
         className="flex-1 p-3 bg-white flex flex-col gap-3 min-h-0 overflow-y-auto custom-scrollbar"
       >
-        {/* 흐름창: 카드 변경 시 자동입력 + 직접 타이핑 수정 가능 + 저장버튼 */}
-        <div className="bg-[#FAF9F5] border border-[#E7E5DF] rounded-xl p-2.5 shadow-2xs shrink-0">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-mono text-[#8C877D] uppercase shrink-0 font-bold">
-              흐름:
-            </span>
-            <input
-              type="text"
-              value={flowText}
-              onFocus={() => setIsEditingFlowText(true)}
-              onChange={(e) => {
-                setIsEditingFlowText(true);
-                setFlowText(e.target.value);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  handleSaveFlowText();
-                }
-              }}
-              placeholder="예: In(4) - V1(8) - PC(4) - C(8) x2 - Out(4)"
-              className="flex-1 bg-white text-xs font-mono font-bold text-[#C96442] px-2.5 py-1 rounded-lg border border-[#E7E5DF] focus:border-[#C96442] focus:ring-1 focus:ring-[#C96442]/20 focus:outline-none shadow-2xs"
-              title="흐름을 직접 수정하거나 자동으로 생성된 순서를 확인하세요"
-            />
-            {/* 흐름 저장 버튼 */}
-            <button
-              type="button"
-              onClick={handleSaveFlowText}
-              disabled={isSaving}
-              className={`flex items-center gap-1 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer shadow-2xs shrink-0 ${
-                flowSavedNotice
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-[#18181B] hover:bg-[#27272A] text-white active:scale-95'
-              }`}
-              title="흐름 텍스트를 파싱하여 송폼 카드 및 곡 정보를 저장합니다"
-            >
-              {flowSavedNotice ? (
-                <>
-                  <Check className="w-3 h-3 stroke-[2.5px]" />
-                  <span className="text-[11px]">저장됨</span>
-                </>
-              ) : (
-                <>
-                  <Save className="w-3 h-3 stroke-[2px]" />
-                  <span className="text-[11px]">저장</span>
-                </>
-              )}
-            </button>
-          </div>
-        </div>
 
         {/* 송폼 와이드 카드 리스트 */}
         {blocks.length === 0 ? (
@@ -691,4 +702,4 @@ export const SongFormBuilder: React.FC<SongFormBuilderProps> = ({
       </div>
     </div>
   );
-};
+});

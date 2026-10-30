@@ -72,7 +72,18 @@ export function parseChord(chordStr: string): ParsedChord | null {
 
   const cleanRest = qualityAndTension.replace(/[()]/g, '').toLowerCase();
 
-  if (cleanRest.startsWith('maj7') || cleanRest.startsWith('m7b5') || cleanRest.startsWith('min7') || cleanRest.startsWith('m7') ||
+  // 코드가 아닌 일반 영단어(Apple, Father, God, Because 등) 필터링: 허용되지 않는 문자열이 포함된 경우 코드가 아님
+  if (cleanRest && /[^majindugsb#\-+0-9]/.test(cleanRest)) {
+    return null;
+  }
+
+  if (cleanRest === '2' || cleanRest === 'add2') {
+    quality = 'sus2';
+  } else if (cleanRest === '5') {
+    quality = '5';
+  } else if (cleanRest.startsWith('sus')) {
+    quality = cleanRest.startsWith('sus2') ? 'sus2' : 'sus4';
+  } else if (cleanRest.startsWith('maj7') || cleanRest.startsWith('m7b5') || cleanRest.startsWith('min7') || cleanRest.startsWith('m7') ||
       cleanRest.startsWith('maj') || cleanRest.startsWith('min') || cleanRest.startsWith('m') ||
       cleanRest.startsWith('dim7') || cleanRest.startsWith('dim') || cleanRest.startsWith('aug') ||
       cleanRest.startsWith('sus4') || cleanRest.startsWith('sus2') || cleanRest.startsWith('7b5') ||
@@ -113,6 +124,11 @@ export function parseChord(chordStr: string): ParsedChord | null {
   else if (cleanRest.includes('11')) tension = '11';
   else if (cleanRest.includes('13')) tension = '13';
   else if (cleanRest.includes('6') && quality !== '6') tension = '6';
+
+  // 만약 접미사(cleanRest)가 남아있는데 퀄리티/텐션 어디에도 매칭되지 않는다면 코드가 아님
+  if (cleanRest && !quality && !tension) {
+    return null;
+  }
 
   return {
     raw,
@@ -233,6 +249,8 @@ export function getChordIntervals(quality: string, tension: string): number[] {
     intervals = [0, 4, 7, 10, 15];
   } else if (q === '6') {
     intervals = [0, 4, 7, 9];
+  } else if (q === '5') {
+    intervals = [0, 7];
   }
 
   // 텐션 추가

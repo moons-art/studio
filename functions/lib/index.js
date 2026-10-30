@@ -196,6 +196,26 @@ const SCORE_ANALYSIS_SYSTEM_PROMPT = `당신은 최고 수준의 시각 악보 �
 
 ---
 
+### [규칙 5: 찬양팀 실연용 전문적이고 풍부한 송폼(Song Form) 및 연주 가이드라인 (핵심)]
+악보에 적힌 기본 단락을 넘어, 실제 예배 찬양 및 현대 워십 밴드(마커스, 어노인팅, Hillsong 등)의 실연에서 사용하는 **기승전결이 살아있는 풍부하고 전문적인 "songFormBlocks" 배열**을 반드시 구성하세요:
+1. **필수 포함 파트 구성 원칙**:
+   - **Intro (전주)**: 4~8마디. 곡의 조성(Key)과 템포를 여는 도입부. 대표 코드 진행과 연주 악기(피아노 아르페지오, 어쿠스틱 기타 등) 명시.
+   - **Verse 1 / Verse 2 (절)**: 8~16마디. 잔잔한 고백과 멜로디.
+   - **Pre-Chorus (상승부)**: 후렴으로 넘어가기 전 긴장감과 리듬을 고조시키는 4~8마디 파트 (해당 곡에 적합한 경우 반드시 분리 배치).
+   - **Chorus (후렴)**: 8~16마디. 곡의 메인 테마와 풀밴드 참여.
+   - **Interlude (간주)**: Verse와 Verse 사이 또는 Chorus 후 다음 파트로 넘어갈 때, 음악적 호흡과 악기 솔로/테마 리프를 위한 2~4마디 또는 8마디 간주를 반드시 배치!
+   - **Bridge (브릿지)**: 새로운 화성과 멜로디로 클라이맥스를 준비하는 8~16마디 빌드업 파트.
+   - **Climax / Chorus 2 (후렴 반복 & 절정)**: 전 악기 최고조(ff) 합주, 심벌 오픈, 에너지 폭발.
+   - **Tag / Outro (엔딩 태그 & 후주)**: 마지막 핵심 가사 반복(Tag) 또는 잔잔하게 여운을 남기는 4~8마디 아웃트로.
+2. **각 블록 객체 필수 속성**:
+   - "type": 파트명 (예: "Intro", "Verse 1", "Pre-Chorus", "Chorus 1", "Interlude", "Verse 2", "Bridge", "Chorus 2", "Tag & Outro")
+   - "barCount": 해당 파트의 마디 수 (숫자, 예: 4, 8, 16)
+   - "repeatCount": 반복 횟수 (숫자, 기본 1)
+   - "chords": 해당 파트의 대표 코드 진행 문자열 (예: "A - E/G# - F#m7 - D", "D - E/D - C#m7 - F#m7")
+   - "memo": 건반, 어쿠스틱/일렉 기타, 베이스, 드럼, 보컬 각 파트를 위한 전문 연주 팁 및 다이내믹 가이드 1~2줄 (전문 음악 용어 활용)
+
+---
+
 ### [출력 JSON 스키마 규격]
 반드시 아래 키를 가진 JSON 객체 하나만 순수하게 출력하세요. 마크다운 따옴표(\`\`\`json) 없이 순수 JSON만 반환하세요:
 {
@@ -209,7 +229,7 @@ const SCORE_ANALYSIS_SYSTEM_PROMPT = `당신은 최고 수준의 시각 악보 �
   "keySignature": "",
   "chordProgressionSummary": "",
   "theme": "",
-  "structure": "",
+  "structure": "Intro(4) -> Verse 1(8) -> Chorus(8) -> Interlude(4) -> Verse 2(8) -> Chorus(8) -> Bridge(8) -> Chorus(8) -> Outro(4)",
   "sections": [
     {
       "sectionName": "[Verse 1]",
@@ -226,6 +246,43 @@ const SCORE_ANALYSIS_SYSTEM_PROMPT = `당신은 최고 수준의 시각 악보 �
       ]
     }
   ],
+  "songFormBlocks": [
+    {
+      "type": "Intro",
+      "barCount": 4,
+      "repeatCount": 1,
+      "chords": "A - E/G# - F#m7 - D",
+      "memo": "피아노 아르페지오와 패드 앰비언스로 4마디 잔잔하게 시작"
+    },
+    {
+      "type": "Verse 1",
+      "barCount": 8,
+      "repeatCount": 1,
+      "chords": "A - C#m7 - D - E",
+      "memo": "어쿠스틱 기타 스트럼과 보컬 중심, 베이스/드럼은 쉬며 담담하게 고백"
+    },
+    {
+      "type": "Chorus",
+      "barCount": 8,
+      "repeatCount": 1,
+      "chords": "A - E/G# - F#m7 - D",
+      "memo": "풀밴드 사운드 유입, 8비트 드라이브와 힘찬 싱어 유니즌"
+    },
+    {
+      "type": "Interlude",
+      "barCount": 4,
+      "repeatCount": 1,
+      "chords": "D - E - F#m7 - E/G#",
+      "memo": "피아노 테마 멜로디의 4마디 간주, 다음 절을 위한 호흡 정돈"
+    },
+    {
+      "type": "Outro",
+      "barCount": 4,
+      "repeatCount": 1,
+      "chords": "D - E - A",
+      "memo": "마지막 소절 가사 아카펠라 후 피아노 아르페지오로 페이드아웃"
+    }
+  ],
   "musicalNotes": ""
 }`;
 exports.analyzeScoreCallable = (0, https_1.onCall)({
@@ -233,10 +290,15 @@ exports.analyzeScoreCallable = (0, https_1.onCall)({
     memory: "512MiB",
     timeoutSeconds: 60,
     minInstances: 0,
+    maxInstances: 10, // 과도한 동시 호출 및 과금 스파이크 원천 방어
 }, async (request) => {
     const { mimeType = "image/jpeg", base64Data, customApiKey } = request.data || {};
     if (!base64Data || typeof base64Data !== "string") {
         throw new https_1.HttpsError("invalid-argument", "분석할 악보 이미지 데이터가 누락되었습니다.");
+    }
+    // 비정상적인 대용량 페이로드(25MB 초과) DoS 방어
+    if (base64Data.length > 35 * 1024 * 1024) {
+        throw new https_1.HttpsError("invalid-argument", "악보 이미지 데이터 크기가 제한(25MB)을 초과했습니다.");
     }
     // 서버 내부 안전 키 획득 (서버 환경변수 > 커스텀 키 > 서버 안전 토큰)
     const apiKey = (customApiKey && String(customApiKey).trim()) ||
@@ -324,10 +386,14 @@ exports.searchYoutubeVideosCallable = (0, https_1.onCall)({
     memory: "256MiB",
     timeoutSeconds: 15,
     minInstances: 0,
+    maxInstances: 10,
 }, async (request) => {
     const { query, maxResults = 15 } = request.data || {};
     if (!query || typeof query !== "string") {
         throw new https_1.HttpsError("invalid-argument", "검색어가 누락되었습니다.");
+    }
+    if (query.length > 100) {
+        throw new https_1.HttpsError("invalid-argument", "검색어가 너무 깁니다. (100자 이하)");
     }
     const cleanQuery = `${query.trim()} CCM 찬양`.trim();
     const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(cleanQuery)}`;

@@ -44,12 +44,12 @@ export interface ScoreAnalysisResult {
   musicalNotes?: string;             // 연주 팁
 }
 
-// 기본 API 키 및 커스텀 키 관리
+// 커스텀 API 키 관리
 const STORAGE_KEY_CUSTOM_GEMINI = 'nations_gemini_api_key';
-const FALLBACK_KEY_TOKEN = 'QVEuQWI4Uk42TERYaDJmMV9BMEtXZUxMcFh5b09odU53MTBPZ3pnQnRvMDU1c3I4aHVIRnc=';
 
 /**
- * 활성 Gemini API 키 가져오기 (커스텀 설정 키 > 환경변수 > 기본 키)
+ * 활성 Gemini API 키 가져오기 (커스텀 설정 키 > 환경변수)
+ * 보안 표준: 클라이언트 코드에 기본 키를 하드코딩하지 않으며, 기본 호출은 서버리스 프록시를 통해 안전하게 수행합니다.
  */
 export function getGeminiApiKey(): string {
   if (typeof window !== 'undefined') {
@@ -58,11 +58,7 @@ export function getGeminiApiKey(): string {
   }
   const envKey = typeof import.meta !== 'undefined' ? (import.meta.env?.VITE_GEMINI_API_KEY as string) : '';
   if (envKey && envKey.trim()) return envKey.trim();
-  try {
-    return typeof atob !== 'undefined' ? atob(FALLBACK_KEY_TOKEN) : '';
-  } catch {
-    return '';
-  }
+  return '';
 }
 
 /**
@@ -122,9 +118,19 @@ const SCORE_ANALYSIS_SYSTEM_PROMPT = `당신은 최고 수준의 시각 악보 �
    - 작곡가/작사가 이름만 간결하게 (예: "정신호", "박정은")
 4. "timeSignature" (박자): 박자표 (예: "4/4", "3/4", "6/8")
 5. "tempo" (템포): 악보 상의 빠르기 표기 (예: "Moderato (약 72 BPM)", "♩=68", "Andante con moto")
-6. "keySignature" (원곡조성): 조표와 으뜸음 기반 조성 (예: "A Major", "G", "F#m")
+6. "keySignature" (원곡조성):
+   - 악보 맨 앞의 조표(올림표 # 또는 내림표 b 개수)와 첫 코드/종지 코드를 음악 이론에 따라 정확하게 대조하여 조성(Key)을 판별하세요.
+   - [조표 판별 필수 공식]:
+     * # 1개 = G (또는 Em)
+     * # 2개 = D (또는 Bm)
+     * # 3개 = A (또는 F#m)
+     * # 4개(F#, C#, G#, D#) = 반드시 'E' (또는 C#m) 입니다. 끝의 샵 줄 위치(G#)를 키로 오인하지 마세요!
+     * # 5개 = B (또는 G#m)
+     * b 1개 = F (또는 Dm), b 2개 = Bb (또는 Gm), b 3개 = Eb (또는 Cm)
+   - 시작 코드나 후렴 코드가 E이면 무조건 "E" 또는 "E Major"로 출력하세요.
 7. "chordProgressionSummary" (주요진행): 곡을 대표하는 핵심 코드 진행 (예: "A - E/C# - D - A7/C# - Bm - E - A")
-8. "theme" (주제/장르): 곡의 분위기 및 장르 1줄 요약 (예: "CCM / 예배 / 결단")
+8. "theme" (분류/키워드):
+   - 긴 서술형 문장(예: "~를 찬양하는 경배와 찬양")이 아닌, 핵심 키워드/단어 2~4개만 쉼표(,)로 나열하세요. (예: "친밀감, 은혜, 찬양", "감사, 결단, 헌신", "위로, 평안, 기도")
 9. "structure" (곡 구성): 전체 송폼 (예: "Verse -> Chorus", "Intro -> V1 -> C -> Outro")
 
 ---
@@ -156,14 +162,23 @@ const SCORE_ANALYSIS_SYSTEM_PROMPT = `당신은 최고 수준의 시각 악보 �
 
 ---
 
-### [규칙 6: 찬양팀용 구조화된 송폼 블록 및 파트별 코드진행, 연주팁 자동 구성 (핵심)]
-악보의 기승전결(Intro - Verse - Chorus - Outro 등)과 음악적 호흡을 분석하여 "songFormBlocks" 배열을 반드시 구성하세요:
-각 블록 객체:
-- "type": 송폼 파트명 (예: "Intro", "Verse 1", "Verse 2", "Chorus", "Bridge", "Outro")
-- "barCount": 해당 파트의 마디 수 (숫자, 예: 4 또는 8)
-- "repeatCount": 기본 반복 횟수 (기본 1)
-- "chords": 해당 파트의 대표 코드 진행 (예: "C - G/B - Am7 - G", "F - G - Em - Am")
-- "memo": 찬양팀 인도자 및 연주자를 위한 파트별 연주 팁 및 무드 가이드 1줄 (예: "피아노 아르페지오로 잔잔하게 시작", "풀밴드 강한 드럼 비트로 빌드업", "어쿠스틱 기타와 보컬 중심", "스트링과 함께 점진적 고조")
+### [규칙 6: 찬양팀 실연용 전문적이고 풍부한 송폼(Song Form) 및 연주 가이드라인 (핵심)]
+악보에 적힌 기본 단락을 넘어, 실제 예배 찬양 및 현대 워십 밴드(마커스, 어노인팅, Hillsong 등)의 실연에서 사용하는 **기승전결이 살아있는 풍부하고 전문적인 "songFormBlocks" 배열**을 반드시 구성하세요:
+1. **필수 포함 파트 구성 원칙**:
+   - **Intro (전주)**: 4~8마디. 곡의 조성(Key)과 템포를 여는 도입부. 대표 코드 진행과 연주 악기(피아노 아르페지오, 어쿠스틱 기타 등) 명시.
+   - **Verse 1 / Verse 2 (절)**: 8~16마디. 잔잔한 고백과 멜로디.
+   - **Pre-Chorus (상승부)**: 후렴으로 넘어가기 전 긴장감과 리듬을 고조시키는 4~8마디 파트 (해당 곡에 적합한 경우 반드시 분리 배치).
+   - **Chorus (후렴)**: 8~16마디. 곡의 메인 테마와 풀밴드 참여.
+   - **Interlude (간주)**: Verse와 Verse 사이 또는 Chorus 후 다음 파트로 넘어갈 때, 음악적 호흡과 악기 솔로/테마 리프를 위한 2~4마디 또는 8마디 간주를 반드시 배치!
+   - **Bridge (브릿지)**: 새로운 화성과 멜로디로 클라이맥스를 준비하는 8~16마디 빌드업 파트.
+   - **Climax / Chorus 2 (후렴 반복 & 절정)**: 전 악기 최고조(ff) 합주, 심벌 오픈, 에너지 폭발.
+   - **Tag / Outro (엔딩 태그 & 후주)**: 마지막 핵심 가사 반복(Tag) 또는 잔잔하게 여운을 남기는 4~8마디 아웃트로.
+2. **각 블록 객체 필수 속성**:
+   - "type": 파트명 (예: "Intro", "Verse 1", "Pre-Chorus", "Chorus 1", "Interlude", "Verse 2", "Bridge", "Chorus 2", "Tag & Outro")
+   - "barCount": 해당 파트의 마디 수 (숫자, 예: 4, 8, 16)
+   - "repeatCount": 반복 횟수 (숫자, 기본 1)
+   - "chords": 해당 파트의 대표 코드 진행 문자열 (예: "A - E/G# - F#m7 - D", "D - E/D - C#m7 - F#m7")
+   - "memo": 건반, 어쿠스틱/일렉 기타, 베이스, 드럼, 보컬 각 파트를 위한 전문 연주 팁 및 다이내믹 가이드 1~2줄 (전문 음악 용어 활용)
 
 반드시 순수 JSON 형식으로만 응답하세요. 마크다운 앞뒤 사설을 넣지 마세요.`;
 
@@ -376,7 +391,7 @@ async function executeGeminiVisionAnalysis(
 }
 
 /**
- * 악보 이미지 AI 분석 실행 (최신 직접 호출 우선 -> 서버리스 폴백)
+ * 악보 이미지 AI 분석 실행 (업계 표준 보안: 서버리스 안전 프록시 기본 호출 -> 커스텀 키 설정 시 직접 호출 지원)
  */
 export async function analyzeScoreImage(
   imageSource: string | Blob, 
@@ -385,17 +400,17 @@ export async function analyzeScoreImage(
   // 1. 이미지를 Base64 데이터로 변환
   const { mimeType, base64Data } = await toBase64Image(imageSource);
 
-  // 2. 최신 프롬프트와 정밀 CJK 싱크 엔진이 즉시 반영되는 직접 호출 우선 시도
-  const apiKey = (customApiKey && customApiKey.trim()) || getGeminiApiKey();
-  if (apiKey) {
+  // 2. 사용자가 관리자 화면에서 명시적으로 등록한 개인 커스텀 키가 있는 경우 우선 직접 호출 시도
+  const userApiKey = (customApiKey && customApiKey.trim()) || getGeminiApiKey();
+  if (userApiKey) {
     try {
-      return await executeGeminiVisionAnalysis(mimeType, base64Data, apiKey);
+      return await executeGeminiVisionAnalysis(mimeType, base64Data, userApiKey);
     } catch (directErr: any) {
-      console.warn('[aiScoreService] Direct Gemini call failed, trying serverless fallback:', directErr?.message || directErr);
+      console.warn('[aiScoreService] Custom API key direct call failed, falling back to serverless:', directErr?.message || directErr);
     }
   }
 
-  // 3. 서버리스 함수(analyzeScoreCallable) 폴백
+  // 3. 업계 표준 보안: 서버리스 안전 프록시 함수(analyzeScoreCallable) 호출 (API 키 클라이언트 노출 0%)
   try {
     const { functions } = await import('./firebaseConfig');
     const { httpsCallable } = await import('firebase/functions');
@@ -406,7 +421,7 @@ export async function analyzeScoreImage(
     const serverRes = await analyzeCallable({
       mimeType: mimeType || 'image/jpeg',
       base64Data,
-      customApiKey: customApiKey || undefined
+      customApiKey: userApiKey || undefined
     });
 
     if (serverRes?.data?.success && serverRes.data.result) {
@@ -414,7 +429,8 @@ export async function analyzeScoreImage(
       return serverRes.data.result;
     }
   } catch (serverErr: any) {
-    console.warn('[aiScoreService] Serverless callable bypassed or failed:', serverErr?.message || serverErr);
+    console.error('[aiScoreService] Serverless callable error:', serverErr?.message || serverErr);
+    throw new Error(serverErr?.message || '악보 분석 서버리스 처리에 실패했습니다. 잠시 후 다시 시도해 주세요.');
   }
 
   throw new Error('악보 분석 처리에 실패했습니다. 잠시 후 다시 시도해 주세요.');

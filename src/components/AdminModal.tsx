@@ -103,9 +103,27 @@ export const AdminModal: React.FC<AdminModalProps> = ({ onClose, initialAuthenti
     setIsHymnalVisible(val);
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  // 관리자 인증 해시 (SHA-256) - 평문 패스워드 번들 노출 방지
+  const ADMIN_PASS_HASH = 'fc2fe9eecc87d42b5078a0d0ff5ddbf9a416bddc99ba30449e2426893e98297d';
+
+  const verifyAdminPassword = async (input: string): Promise<boolean> => {
+    if (!input) return false;
+    try {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(input.trim());
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      return hashHex === ADMIN_PASS_HASH;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (password === '8395') {
+    const isValid = await verifyAdminPassword(password);
+    if (isValid) {
       setIsAuthenticated(true);
       fetchDashboardData();
     } else {

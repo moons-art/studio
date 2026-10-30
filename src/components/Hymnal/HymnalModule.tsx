@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { HymnalSong } from '../../types/hymnal';
 import { useHymnal } from '../../stores/HymnalProvider';
 import { 
@@ -43,7 +43,7 @@ import { SavedContisModal } from './SavedContisModal';
 import { VirtualPiano } from './VirtualPiano';
 import { ChordBuilderModal } from './ChordBuilderModal';
 import { InteractiveChordViewer } from './InteractiveChordViewer';
-import { SongFormBuilder } from './SongFormBuilder';
+import { SongFormBuilder, type SongFormBuilderHandle } from './SongFormBuilder';
 import { LiveStagePrompter } from './LiveStagePrompter';
 import type { SongFormBlock } from '../../types/hymnal';
 import { soundEngine, type InstrumentType } from '../../utils/soundEngine';
@@ -240,11 +240,13 @@ export const HymnalModule: React.FC = () => {
   const [editedVideos, setEditedVideos] = useState<{name: string, url: string, isShared?: boolean}[]>([]);
   const [activeVideoIndex, setActiveVideoIndex] = useState(0);
   const [showYoutubePlayer, setShowYoutubePlayer] = useState(false);
-  const [showCodeText, setShowCodeText] = useState(true); // 기본으로 코드 텍스트/송폼 우측 패널 표시
-  const [rightPanelTab, setRightPanelTab] = useState<'chordText' | 'songForm'>('chordText'); // 'chordText' (코드악보TEXT) vs 'songForm' (송폼편집)
+  const [showCodeText, setShowCodeText] = useState(false); // 기본으로 악보가 전체 패널에 보이도록 설정
+  const [rightPanelTab, setRightPanelTab] = useState<'chordText' | 'songForm'>('chordText'); // 'chordText' (코드악보) vs 'songForm' (송폼편집)
   const [showPrompter, setShowPrompter] = useState(false);
   const [prompterBlocks, setPrompterBlocks] = useState<SongFormBlock[]>([]);
   const [isSavingSongForm, setIsSavingSongForm] = useState(false);
+  const [songFormSavedNotice, setSongFormSavedNotice] = useState(false);
+  const songFormRef = useRef<SongFormBuilderHandle>(null);
   const [youtubeWidth, setYoutubeWidth] = useState(480);
   const [isResizingYoutube, setIsResizingYoutube] = useState(false);
   const [copiedLyrics, setCopiedLyrics] = useState(false);
@@ -255,6 +257,26 @@ export const HymnalModule: React.FC = () => {
   const [visibleCount, setVisibleCount] = useState(50);
   const [swipedSongId, setSwipedSongId] = useState<string | null>(null);
   const [isDraggingSong, setIsDraggingSong] = useState(false);
+
+  // 모바일 세로 화면 감지 (640px 미만일 때 전체 화면으로 패널 확장)
+  const [isMobile, setIsMobile] = useState<boolean>(() => typeof window !== 'undefined' ? window.innerWidth < 640 : false);
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 640);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // 좌측 악보목록 탭: 마우스로 건들면(호버 시) 자동으로 열리고 닫히는 핸들러 (연속 토글 방지 쿨다운 적용)
+  const lastLeftToggleTimeRef = useRef(0);
+  const handleToggleListOnHover = () => {
+    const now = Date.now();
+    if (now - lastLeftToggleTimeRef.current > 350) {
+      lastLeftToggleTimeRef.current = now;
+      setIsListOpen(prev => !prev);
+    }
+  };
 
   // --- 음악 및 코드 관련 UI 상태 ---
   const [chordViewMode, setChordViewMode] = useState<'play' | 'edit'>('edit'); // 기본은 'edit'(수정 가능한 텍스트 모드)
@@ -372,7 +394,7 @@ export const HymnalModule: React.FC = () => {
     setIsEditing(false);
     setIsDeleteOriginal(false); // 삭제 옵션 초기화
     setShowYoutubePlayer(false); // 곡 변경 시 플레이어 닫기
-    setShowCodeText(true); // 기본으로 코드 텍스트 창 표시
+    setShowCodeText(false); // 곡 변경 시에도 기본으로 악보가 보이도록 유지
     setChordViewMode('edit'); // 기본은 수정 가능한 텍스트 모드
     setShowVirtualPiano(false);
     setActiveVideoIndex(0); // 첫 번째 영상으로 초기화
@@ -634,31 +656,26 @@ export const HymnalModule: React.FC = () => {
           chords: b.chords || '',
           memo: b.memo || '',
         }));
-      } else if (result.sections && result.sections.length > 0) {
-        generatedSongFormBlocks = result.sections.map((sec, idx) => {
-          const rawName = sec.sectionName.replace(/[\[\]]/g, '').trim();
-          const firstChordLine = sec.lines?.find(l => l.chordLineText?.trim())?.chordLineText?.trim() || '';
-          const cleanChords = firstChordLine.split(/\s+/).filter(Boolean).slice(0, 4).join(' - ');
-          return {
-            id: `block_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 6)}`,
-            type: rawName || `Part ${idx + 1}`,
-            barCount: 8,
-            repeatCount: 1,
-            chords: cleanChords || result.chordProgressionSummary || '',
-            memo: idx === 0 
-              ? '피아노와 보컬로 잔잔하게 시작' 
-              : idx === result.sections.length - 1 
-                ? '아웃트로 페이드아웃 및 여운' 
-                : '전체 악기 합주 빌드업',
-          };
-        });
       } else {
+        // 인트로, 간주, 브릿지, 아웃트로를 포함한 풍부한 8~9단계 전문 워십 송폼 자동 구성
         const { createNewSongFormBlock } = await import('../../utils/songFormUtils');
+        const summary = result.chordProgressionSummary || (newCode ? `${newCode} KEY 대표 진행` : '');
+        
+        // 악보에서 추출된 섹션별 코드 라인 추출
+        const verseChords = result.sections?.find(s => s.sectionName.toLowerCase().includes('verse'))?.lines?.find(l => l.chordLineText?.trim())?.chordLineText?.split(/\s+/).filter(Boolean).slice(0, 4).join(' - ') || summary;
+        const chorusChords = result.sections?.find(s => s.sectionName.toLowerCase().includes('chorus'))?.lines?.find(l => l.chordLineText?.trim())?.chordLineText?.split(/\s+/).filter(Boolean).slice(0, 4).join(' - ') || summary;
+        const bridgeChords = result.sections?.find(s => s.sectionName.toLowerCase().includes('bridge'))?.lines?.find(l => l.chordLineText?.trim())?.chordLineText?.split(/\s+/).filter(Boolean).slice(0, 4).join(' - ') || chorusChords;
+
         generatedSongFormBlocks = [
-          createNewSongFormBlock('Intro', 4, '피아노 인트로로 잔잔하게 시작', result.chordProgressionSummary || ''),
-          createNewSongFormBlock('Verse 1', 8, '어쿠스틱 기타와 차분한 멜로디', result.chordProgressionSummary || ''),
-          createNewSongFormBlock('Chorus', 8, '풀밴드 드럼 비트 및 감정 고조', result.chordProgressionSummary || ''),
-          createNewSongFormBlock('Outro', 4, '피아노 아르페지오 및 조용한 마무리', result.chordProgressionSummary || ''),
+          createNewSongFormBlock('Intro', 4, '피아노 아르페지오와 패드 앰비언스로 4마디 잔잔하게 시작', chorusChords || summary),
+          createNewSongFormBlock('Verse 1', 8, '어쿠스틱 기타와 담담한 보컬 고백, 리듬 절제', verseChords),
+          createNewSongFormBlock('Pre-Chorus', 4, '스네어 림샷과 베이스 라인 유입, 후렴으로 빌드업', verseChords),
+          createNewSongFormBlock('Chorus', 8, '풀밴드 8비트 사운드와 힘찬 싱어 합창', chorusChords),
+          createNewSongFormBlock('Interlude', 4, '피아노/기타 테마 멜로디의 4마디 간주, 호흡 정돈', chorusChords || summary),
+          createNewSongFormBlock('Verse 2', 8, '드럼 하이햇 8비트 유지, 베이스와 함께 그루브감 있게 진행', verseChords),
+          createNewSongFormBlock('Bridge', 8, '화성적 전환, 5마디부터 풀스네어 크레센도로 클라이맥스 폭발 준비', bridgeChords),
+          createNewSongFormBlock('Chorus 2', 8, '최고의 절정, 심벌 오픈과 전 악기 포르티시모(ff) 합주', chorusChords),
+          createNewSongFormBlock('Tag & Outro', 4, '마지막 가사 아카펠라 후 피아노 아르페지오 페이드아웃', chorusChords || summary),
         ];
       }
 
@@ -918,18 +935,18 @@ export const HymnalModule: React.FC = () => {
 
       {/* 3단: 악보 뷰어 영역 (Main Content) */}
       <div className="flex-1 flex flex-col relative bg-white overflow-hidden">
-        {/* 악보뷰 패널 좌측 목록여는 화살표 탭 */}
+        {/* 악보뷰 패널 좌측 목록여는 화살표 탭 (건들면 열리고 건들면 닫힘) */}
         <button 
-          onClick={() => setIsListOpen(!isListOpen)}
-          onMouseEnter={() => setIsListOpen(!isListOpen)}
-          className="absolute left-0 top-1/2 -translate-y-1/2 h-[40%] w-4.5 hover:w-5 bg-white/90 hover:bg-[#F5F3EF] border-y border-r border-[#E7E5DF] rounded-r-2xl z-30 flex items-center justify-center text-[#8C8983] hover:text-[#2C2B29] transition-all cursor-pointer group shadow-sm backdrop-blur-xs"
-          title={isListOpen ? "곡 목록 접기" : "곡 목록 펴기"}
+          onClick={handleToggleListOnHover}
+          onMouseEnter={handleToggleListOnHover}
+          className="absolute left-0 top-1/2 -translate-y-1/2 h-[13%] min-h-[44px] max-h-[58px] w-4 hover:w-5 bg-[#C96442] hover:bg-[#B55737] border-y border-r border-[#A84829] rounded-r-xl z-30 flex items-center justify-center text-white transition-all cursor-pointer group shadow-md"
+          title={isListOpen ? "곡 목록 접기 (마우스로 건들면 닫힘)" : "곡 목록 펴기 (마우스로 건들면 열림)"}
         >
-          <div className="flex flex-col items-center justify-center py-2">
+          <div className="flex flex-col items-center justify-center py-1">
             {isListOpen ? (
-              <ChevronLeftIcon className="w-3.5 h-3.5 stroke-[2.2px] transition-transform group-hover:-translate-x-0.5" />
+              <ChevronLeftIcon className="w-3.5 h-3.5 stroke-[2.5px] text-white transition-transform group-hover:-translate-x-0.5" />
             ) : (
-              <ChevronRightIcon className="w-3.5 h-3.5 stroke-[2.2px] transition-transform group-hover:translate-x-0.5" />
+              <ChevronRightIcon className="w-3.5 h-3.5 stroke-[2.5px] text-white transition-transform group-hover:translate-x-0.5" />
             )}
           </div>
         </button>
@@ -1102,7 +1119,7 @@ export const HymnalModule: React.FC = () => {
                     </div>
                   ) : (
                     <div className="flex flex-col gap-2 w-full">
-                      {/* 1행: [좌측 악보제목 (50% 크기, 고딕체)] -------------------- [우측 앨범이름] */}
+                      {/* 1행: [좌측 악보제목] -------------------- [우측: 상세편집 + 앨범이름] */}
                       <div className="flex items-center justify-between gap-4">
                         <h2 className="font-sans text-sm sm:text-base font-bold text-[#2C2B29] tracking-tight truncate">
                           {selectedSong?.number}. {selectedSong?.title}
@@ -1111,17 +1128,30 @@ export const HymnalModule: React.FC = () => {
                           )}
                         </h2>
 
-                        {/* 우측 앨범이름 */}
-                        <div className="flex items-center gap-1.5 text-xs text-[#8C877D] font-medium shrink-0 bg-[#FAF9F5] px-2.5 py-1 rounded-lg border border-[#E7E5DF]">
-                          <FolderOpen className="w-3.5 h-3.5 text-[#A3A19B] stroke-[1.5px]" />
-                          <span>{albums.find(a => selectedSong?.id.startsWith(`${a.id}-`))?.name || '앨범 미지정'}</span>
+                        {/* 우측: 상세편집 + 앨범이름 */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          {/* 상세편집 버튼 */}
+                          <button 
+                            onClick={startEditing}
+                            className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-[#4A4741] hover:text-[#2B2927] hover:bg-[#F3EFE9] rounded-lg transition-colors cursor-pointer border border-[#E7E5DF] bg-white shadow-2xs"
+                            title="곡 정보 상세 편집 모달 열기"
+                          >
+                            <Edit2 className="w-3.5 h-3.5 stroke-[1.8px] text-[#6E6A63]" />
+                            <span>상세편집</span>
+                          </button>
+
+                          {/* 앨범이름 */}
+                          <div className="flex items-center gap-1.5 text-xs text-[#8C877D] font-medium shrink-0 bg-[#FAF9F5] px-2.5 py-1 rounded-lg border border-[#E7E5DF]">
+                            <FolderOpen className="w-3.5 h-3.5 text-[#A3A19B] stroke-[1.5px]" />
+                            <span>{albums.find(a => selectedSong?.id.startsWith(`${a.id}-`))?.name || '앨범 미지정'}</span>
+                          </div>
                         </div>
                       </div>
 
-                      {/* 2행: [좌측 버튼들: 콘티담기, 상세편집, 영상보기, 코드 TEXT] ------ [우측 정보: 박자, 키, 주제] */}
+                      {/* 2행: [좌측 메뉴: 콘티담기, AI 악보분석(검정), 악보보기, 코드악보, 송폼편집, 유튜브] */}
                       <div className="flex items-center justify-between gap-3 flex-wrap">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          {/* 콘티 담기 */}
+                          {/* 1. 콘티담기 */}
                           <button 
                             onClick={handleAddCurrentToConti}
                             className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-[#D97757] hover:bg-[#FAF0EB] rounded-lg transition-colors cursor-pointer border border-[#F1D3C6] bg-[#FAF0EB]/40 shadow-2xs"
@@ -1130,53 +1160,37 @@ export const HymnalModule: React.FC = () => {
                             <span>콘티담기</span>
                           </button>
 
-                          {/* AI 악보정보 분석 (아이콘 제거, 심플한 글자) */}
+                          {/* 2. AI 악보분석 (검은색 버튼) */}
                           <button 
                             onClick={handleAnalyzeScore}
                             disabled={isAnalyzingScore}
-                            className={`flex items-center px-2.5 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer border shadow-2xs ${
+                            className={`flex items-center px-2.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer border shadow-2xs ${
                               isAnalyzingScore
-                                ? 'bg-neutral-100 text-neutral-400 border-neutral-200 cursor-not-allowed'
-                                : 'bg-white text-[#4A4741] hover:text-[#2B2927] hover:bg-[#F3EFE9] border-[#E7E5DF]'
+                                ? 'bg-neutral-800 text-neutral-400 border-neutral-700 cursor-not-allowed'
+                                : 'bg-[#18181B] text-white hover:bg-[#27272A] border-[#27272A] active:scale-95'
                             }`}
                             title="AI가 악보 이미지를 판독하여 제목, 코드(Key), 박자, 가사+코드를 자동 추출합니다"
                           >
-                            <span>{isAnalyzingScore ? '분석 중...' : 'AI 악보정보 분석'}</span>
+                            <span>{isAnalyzingScore ? '분석 중...' : 'AI 악보분석'}</span>
                           </button>
 
-                          {/* 상세 편집 */}
-                          <button 
-                            onClick={startEditing}
-                            className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-[#4A4741] hover:text-[#2B2927] hover:bg-[#F3EFE9] rounded-lg transition-colors cursor-pointer border border-[#E7E5DF] bg-white shadow-2xs"
-                          >
-                            <Edit2 className="w-3.5 h-3.5 stroke-[1.8px] text-[#6E6A63]" />
-                            <span>상세편집</span>
-                          </button>
-
-                          {/* 유튜브 영상 버튼 - 패널 열기 및 검색 */}
+                          {/* 3. 악보보기 (코드악보, 송폼편집 패널 끄고 악보만 크게 보기) */}
                           <button 
                             onClick={() => {
-                              const next = !showYoutubePlayer;
-                              setShowYoutubePlayer(next);
-                              if (next && selectedSong) {
-                                handleSearchYoutube(selectedSong.title);
-                              }
+                              setShowCodeText(false);
                             }}
                             className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer border shadow-2xs ${
-                              showYoutubePlayer 
+                              !showCodeText
                                 ? 'bg-[#FAF0EB] text-[#C96442] border-[#F1D3C6] font-semibold' 
                                 : 'bg-white text-[#4A4741] hover:text-[#C96442] hover:bg-[#FAF0EB] border-[#E7E5DF]'
                             }`}
-                            title="유튜브 찬양 영상 패널 및 검색 열기/닫기"
+                            title="코드악보 및 송폼편집 창을 닫고 악보만 봅니다"
                           >
-                            <Youtube className={`w-3.5 h-3.5 ${showYoutubePlayer ? 'text-[#C96442]' : 'text-[#6E6A63]'}`} />
-                            <span>유튜브영상</span>
-                            {selectedSong?.youtubeVideos && selectedSong.youtubeVideos.length > 0 && (
-                              <span className="text-[10px] text-[#A3A19B] font-mono font-bold">({selectedSong.youtubeVideos.length})</span>
-                            )}
+                            <Music className={`w-3.5 h-3.5 stroke-[1.8px] ${!showCodeText ? 'text-[#C96442]' : 'text-[#6E6A63]'}`} />
+                            <span>악보보기</span>
                           </button>
 
-                          {/* 코드악보TEXT (악보 우측 코드 & 가사 창 토글/선택) */}
+                          {/* 5. 코드악보 (악보 우측 코드 & 가사 창 열기/닫기) */}
                           <button 
                             onClick={() => {
                               if (!showCodeText) {
@@ -1196,10 +1210,10 @@ export const HymnalModule: React.FC = () => {
                             title="악보 우측 코드 & 가사 창 열기/닫기"
                           >
                             <FileText className={`w-3.5 h-3.5 stroke-[1.8px] ${showCodeText && rightPanelTab === 'chordText' ? 'text-[#C96442]' : 'text-[#6E6A63]'}`} />
-                            <span>코드악보TEXT</span>
+                            <span>코드악보</span>
                           </button>
 
-                          {/* 송폼편집 (악보 우측 송폼 빌더 창 토글/선택) */}
+                          {/* 6. 송폼편집 (악보 우측 송폼 빌더 창 열기/닫기) */}
                           <button 
                             onClick={() => {
                               if (!showCodeText) {
@@ -1221,25 +1235,29 @@ export const HymnalModule: React.FC = () => {
                             <Radio className={`w-3.5 h-3.5 stroke-[1.8px] ${showCodeText && rightPanelTab === 'songForm' ? 'text-[#C96442]' : 'text-[#6E6A63]'}`} />
                             <span>송폼편집</span>
                           </button>
-                        </div>
 
-                        {/* 우측 정보: 박자, 키, 주제 */}
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          {selectedSong?.meter && (
-                            <span className="px-2 py-0.5 bg-[#F5F3ED] text-[#6A6864] rounded-lg text-[11px] font-semibold border border-[#E7E5DF]">
-                              {selectedSong.meter}
-                            </span>
-                          )}
-                          {selectedSong?.code && (
-                            <span className="px-2 py-0.5 bg-[#FAF0EB] text-[#C96442] rounded-lg text-[11px] font-bold border border-[#F1D3C6]">
-                              {selectedSong.code} KEY
-                            </span>
-                          )}
-                          {selectedSong?.category && (
-                            <span className="px-2 py-0.5 bg-[#FEF3C7] text-[#78350F] rounded-lg text-[11px] font-semibold border border-[#FDE68A]">
-                              {selectedSong.category}
-                            </span>
-                          )}
+                          {/* 7. 유튜브 (패널 열기 및 검색) */}
+                          <button 
+                            onClick={() => {
+                              const next = !showYoutubePlayer;
+                              setShowYoutubePlayer(next);
+                              if (next && selectedSong) {
+                                handleSearchYoutube(selectedSong.title);
+                              }
+                            }}
+                            className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer border shadow-2xs ${
+                              showYoutubePlayer 
+                                ? 'bg-[#FAF0EB] text-[#C96442] border-[#F1D3C6] font-semibold' 
+                                : 'bg-white text-[#4A4741] hover:text-[#C96442] hover:bg-[#FAF0EB] border-[#E7E5DF]'
+                            }`}
+                            title="유튜브 찬양 영상 패널 및 검색 열기/닫기"
+                          >
+                            <Youtube className={`w-3.5 h-3.5 ${showYoutubePlayer ? 'text-[#C96442]' : 'text-[#6E6A63]'}`} />
+                            <span>유튜브</span>
+                            {selectedSong?.youtubeVideos && selectedSong.youtubeVideos.length > 0 && (
+                              <span className="text-[10px] text-[#A3A19B] font-mono font-bold">({selectedSong.youtubeVideos.length})</span>
+                            )}
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -1247,14 +1265,27 @@ export const HymnalModule: React.FC = () => {
                 </div>
               </div>
 
-              {/* Viewer Main Body (악보패널과 유튜브 패널이 나란히 위치하여 악보가 밀려남, 덮지 않음) */}
+              {/* Viewer Main Body (악보패널과 송폼, 유튜브 패널이 나란히 위치하여 악보가 줄어들어도 뒤에 남고 떨어지지 않음) */}
               <div className="flex-1 flex overflow-hidden bg-[#FAF9F5] relative">
                 
-                {/* 1. 악보 뷰어 + 우측 코드 텍스트 2분할 메인 영역 */}
-                <div className="flex-1 flex flex-col xl:flex-row h-full overflow-hidden relative min-w-0">
+                {/* 우측 최상단: 유튜브 패널 탭 버튼 (열려있지 않을 때 항상 최우측 top-3에 위치, 마우스 호버 시 자동 열림) */}
+                {!showYoutubePlayer && (
+                  <button
+                    type="button"
+                    onMouseEnter={() => setShowYoutubePlayer(true)}
+                    onClick={() => setShowYoutubePlayer(true)}
+                    className="absolute right-0 top-3 z-40 h-[13%] min-h-[44px] max-h-[58px] w-5 hover:w-6.5 bg-[#C96442] hover:bg-[#B55737] text-white rounded-l-xl border-y border-l border-[#A84829] shadow-md flex items-center justify-center transition-all cursor-pointer group select-none pointer-events-auto"
+                    title="유튜브 찬양 영상 패널 열기 (마우스로 건들면 열림)"
+                  >
+                    <Youtube className="w-3.5 h-3.5 stroke-[2px] text-white transition-transform group-hover:scale-110" />
+                  </button>
+                )}
+
+                {/* 1. 악보 뷰어 + 우측 코드 텍스트 2분할 메인 영역 (항상 가로 flex-row 유지) */}
+                <div className="flex-1 flex flex-row h-full overflow-hidden relative min-w-0">
                   
-                  {/* 1-A. 좌측: 악보 이미지 영역 */}
-                  <div className="flex-1 flex flex-col h-full overflow-hidden relative min-w-0">
+                  {/* 1-A. 좌측: 악보 이미지 영역 (전체창을 줄이면 악보가 뒤로 들어가며 줄어들고 한계 도달 시 안보임) */}
+                  <div className="flex-1 w-0 min-w-0 shrink flex flex-col h-full overflow-hidden relative z-10">
                     <div className="flex-1 overflow-auto p-4 sm:p-8 custom-scrollbar relative">
                       {isEditing && (
                         <div className="mb-6 max-w-4xl mx-auto">
@@ -1312,12 +1343,46 @@ export const HymnalModule: React.FC = () => {
                         </button>
                       </div>
                     </div>
+
+                    {/* 송폼 & 코드악보 탭 버튼: 열려있지 않을 때만 악보패널 우측 끝에 표시 (마우스 호버 시 자동 열림) */}
+                    {!showCodeText && (
+                      <button
+                        type="button"
+                        onMouseEnter={() => setShowCodeText(true)}
+                        onClick={() => setShowCodeText(true)}
+                        className={`absolute right-0 ${
+                          showYoutubePlayer ? 'top-3' : 'top-[72px]'
+                        } z-40 h-[13%] min-h-[44px] max-h-[58px] w-5 hover:w-6.5 bg-[#C96442] hover:bg-[#B55737] text-white rounded-l-xl border-y border-l border-[#A84829] shadow-md flex items-center justify-center transition-all cursor-pointer group select-none pointer-events-auto`}
+                        title="송폼 & 코드악보 패널 열기 (마우스로 건들면 열림)"
+                      >
+                        <FileText className="w-3.5 h-3.5 stroke-[2px] text-white transition-transform group-hover:scale-110" />
+                      </button>
+                    )}
                   </div>
 
-                  {/* 1-B. 우측: 코드 텍스트 / 송폼 창 (악보 우측 나란히 배치) */}
-                  {showCodeText && (
-                    <div className="w-full xl:w-[480px] 2xl:w-[540px] flex flex-col h-full bg-[#FAF9F5] border-t xl:border-t-0 xl:border-l border-[#E7E5DF] shrink-0 overflow-hidden shadow-xs">
-                      {/* 최상단 탭 바: [코드악보TEXT] vs [송폼편집] */}
+                  {/* 1-B. 우측: 코드 텍스트 / 송폼 창 (화면이 줄어들어도 폭 고정, 모바일에서는 전체 화면 100% 채움) */}
+                  <AnimatePresence>
+                    {showCodeText && (
+                      <motion.div 
+                        key="chord-songform-side-panel"
+                        initial={{ width: 0, opacity: 0 }}
+                        animate={{ 
+                          width: isMobile ? '100%' : 480, 
+                          opacity: 1 
+                        }}
+                        exit={{ 
+                          width: 0, 
+                          opacity: 0,
+                          transition: { duration: 0.16, ease: 'easeOut' }
+                        }}
+                        transition={{ duration: 0.2, ease: 'easeOut' }}
+                        className={`${
+                          isMobile 
+                            ? 'absolute inset-0 z-50 w-full' 
+                            : 'w-[480px] min-w-[480px] shrink-0 border-l border-[#E7E5DF] z-20'
+                        } flex flex-col h-full bg-[#FAF9F5] overflow-hidden shadow-xl relative`}
+                      >
+                      {/* 최상단 탭 바: [코드악보] vs [송폼편집] ----------------- [저장] [X] */}
                       <div className="px-3 py-2 bg-[#F3EFEA] border-b border-[#E7E5DF] flex items-center justify-between gap-2 shrink-0">
                         <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-[#E7E5DF] shadow-2xs">
                           <button
@@ -1330,7 +1395,7 @@ export const HymnalModule: React.FC = () => {
                             }`}
                           >
                             <FileText className="w-3.5 h-3.5" />
-                            <span>코드악보TEXT</span>
+                            <span>코드악보</span>
                           </button>
                           <button
                             type="button"
@@ -1346,196 +1411,196 @@ export const HymnalModule: React.FC = () => {
                           </button>
                         </div>
 
-                        <button
-                          onClick={() => setShowCodeText(false)}
-                          className="p-1 hover:bg-[#E7E5DF] rounded-lg text-[#A3A19B] hover:text-[#2C2B29] transition-colors cursor-pointer"
-                          title="우측 패널 닫기"
-                        >
-                          <X className="w-4 h-4 stroke-[1.8px]" />
-                        </button>
+                        <div className="flex items-center gap-2">
+                          {/* 최상단 공통 저장 버튼 (코드악보 저장 vs 송폼편집 저장 연동) */}
+                          {rightPanelTab === 'chordText' ? (
+                            <button
+                              type="button"
+                              onClick={handleSaveLyrics}
+                              disabled={isSavingLyrics}
+                              className={`flex items-center gap-1 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer shadow-2xs ${
+                                lyricsSavedNotice
+                                  ? 'bg-emerald-600 text-white'
+                                  : 'bg-[#C96442] hover:bg-[#B55434] text-white active:scale-95'
+                              }`}
+                              title="가사 및 코드 변경사항 저장"
+                            >
+                              {lyricsSavedNotice ? (
+                                <>
+                                  <Check className="w-3.5 h-3.5 stroke-[2.5px]" />
+                                  <span className="text-[11px]">저장됨</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Save className="w-3.5 h-3.5 stroke-[2px]" />
+                                  <span className="text-[11px]">{isSavingLyrics ? '저장중' : '저장'}</span>
+                                </>
+                              )}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => songFormRef.current?.save()}
+                              disabled={isSavingSongForm}
+                              className={`flex items-center gap-1 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer shadow-2xs ${
+                                songFormSavedNotice
+                                  ? 'bg-emerald-600 text-white'
+                                  : 'bg-[#C96442] hover:bg-[#B55434] text-white active:scale-95'
+                              }`}
+                              title="송폼 구성 및 메모 저장"
+                            >
+                              {songFormSavedNotice ? (
+                                <>
+                                  <Check className="w-3.5 h-3.5 stroke-[2.5px]" />
+                                  <span className="text-[11px]">저장됨</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Save className="w-3.5 h-3.5 stroke-[2px]" />
+                                  <span className="text-[11px]">{isSavingSongForm ? '저장중' : '저장'}</span>
+                                </>
+                              )}
+                            </button>
+                          )}
+
+                          {/* 닫기 버튼 */}
+                          <button
+                            onClick={() => setShowCodeText(false)}
+                            className="mr-2 p-1.5 hover:bg-[#E7E5DF] rounded-lg text-[#A3A19B] hover:text-[#2C2B29] transition-colors cursor-pointer"
+                            title="우측 패널 닫기"
+                          >
+                            <X className="w-4 h-4 stroke-[1.8px]" />
+                          </button>
+                        </div>
                       </div>
 
                       {rightPanelTab === 'chordText' ? (
                         <>
-                          {/* 상단 1열: [코드 & 가사] Key뱃지 ------------------ [조옮김] [복사] [저장] */}
-                          <div className="p-3 bg-[#FAF9F5] border-b border-[#E7E5DF] flex flex-col gap-2 shrink-0">
-                            <div className="flex items-center justify-between gap-2 flex-wrap">
-                              <div className="flex items-center gap-2">
-                                <FileText className="w-4 h-4 text-[#C96442]" />
-                                <span className="text-xs font-bold text-[#2C2B29]">코드 & 가사</span>
-                                {selectedSong?.code && (
-                                  <span className="px-1.5 py-0.5 bg-[#FAF0EB] text-[#C96442] rounded text-[10px] font-bold border border-[#F1D3C6]">
-                                    {selectedSong.code} KEY
-                                  </span>
-                                )}
+                          {/* 코드악보 상단 컨트롤 바 (코드생성기, 코드듣기, 조옮김, 복사가 나란히 배치) */}
+                          <div className="px-3 py-2 bg-[#FAF9F5] border-b border-[#E7E5DF] flex items-center gap-1.5 shrink-0 flex-wrap">
+                            {/* 코드생성기 버튼 (검정색) */}
+                            <button
+                              type="button"
+                              onClick={() => setShowChordBuilder(true)}
+                              className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-white bg-[#18181B] hover:bg-[#27272A] border border-[#27272A] rounded-lg transition-all cursor-pointer shadow-2xs shrink-0 active:scale-95"
+                              title="12반음 코드 조합 생성기 열기"
+                            >
+                              <Plus className="w-3 h-3 stroke-[2.5px]" />
+                              <span>코드생성기</span>
+                            </button>
+
+                            {/* 모드 전환: [코드 듣기(검정)] vs [텍스트 돌아가기(흰색)] */}
+                            {chordViewMode === 'edit' ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setChordViewMode('play');
+                                  setShowVirtualPiano(true);
+                                }}
+                                className="flex items-center gap-1.5 px-3 py-1 bg-[#18181B] hover:bg-[#27272A] text-white border border-[#27272A] rounded-lg text-[11px] font-bold transition-all shadow-2xs cursor-pointer active:scale-95 shrink-0"
+                                title="코드를 터치하여 소리를 듣고 건반으로 확인하는 코드 듣기 모드로 전환"
+                              >
+                                <Volume2 className="w-3.5 h-3.5 text-[#F5A623]" />
+                                <span>코드 듣기</span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setChordViewMode('edit');
+                                  setShowVirtualPiano(false);
+                                }}
+                                className="flex items-center gap-1.5 px-3 py-1 bg-white hover:bg-[#FAF9F5] text-[#2C2B29] hover:text-[#C96442] border border-[#E7E5DF] hover:border-[#F1D3C6] rounded-lg text-[11px] font-bold transition-all shadow-2xs cursor-pointer active:scale-95 shrink-0"
+                                title="직접 가사와 코드를 타이핑하여 수정하는 텍스트 편집 모드로 복귀"
+                              >
+                                <Edit2 className="w-3.5 h-3.5 text-[#C96442]" />
+                                <span>텍스트 돌아가기</span>
+                              </button>
+                            )}
+
+                            {/* 코드 듣기 모드일 때 등장하는 악기 선택기 */}
+                            {chordViewMode === 'play' && (
+                              <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-[#E7E5DF] shrink-0">
+                                {(['piano', 'guitar', 'strings'] as InstrumentType[]).map((inst) => {
+                                  const labels: Record<InstrumentType, string> = {
+                                    piano: '피아노',
+                                    guitar: '기타',
+                                    strings: '스트링'
+                                  };
+                                  return (
+                                    <button
+                                      key={inst}
+                                      type="button"
+                                      onClick={() => setSelectedInstrument(inst)}
+                                      className={`px-2 py-0.5 rounded-md text-[10px] font-medium transition-all cursor-pointer ${
+                                        selectedInstrument === inst
+                                          ? 'bg-[#C96442] text-white font-bold shadow-2xs'
+                                          : 'text-[#6A6864] hover:text-[#2C2B29]'
+                                      }`}
+                                    >
+                                      {labels[inst]}
+                                    </button>
+                                  );
+                                })}
                               </div>
+                            )}
 
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                {/* 조옮김 컨트롤러 */}
-                                <div className="flex items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-lg border border-[#E7E5DF] shadow-2xs shrink-0">
-                                  <span className="text-[10px] font-bold text-[#8C877D] mr-1 shrink-0">조옮김</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleTranspose(-1)}
-                                    className="w-5 h-5 shrink-0 flex items-center justify-center hover:bg-[#FAF0EB] text-[#2C2B29] hover:text-[#C96442] font-bold rounded text-xs transition-colors cursor-pointer"
-                                    title="반음 내리기 (-1)"
-                                  >
-                                    -
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      if (transposeOffset !== 0) handleTranspose(-transposeOffset);
-                                    }}
-                                    className="w-9 h-5 shrink-0 flex items-center justify-center text-[10px] font-mono font-bold text-[#4A4741] hover:text-[#C96442] cursor-pointer text-center"
-                                    title="원래 키로 리셋"
-                                  >
-                                    {transposeOffset === 0 ? '원키' : `${transposeOffset > 0 ? `+${transposeOffset}` : transposeOffset}`}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleTranspose(1)}
-                                    className="w-5 h-5 shrink-0 flex items-center justify-center hover:bg-[#FAF0EB] text-[#2C2B29] hover:text-[#C96442] font-bold rounded text-xs transition-colors cursor-pointer"
-                                    title="반음 올리기 (+1)"
-                                  >
-                                    +
-                                  </button>
-                                </div>
-
-                                {/* 복사 버튼 */}
-                                <button
-                                  onClick={() => {
-                                    if (lyricsEditValue) {
-                                      navigator.clipboard.writeText(lyricsEditValue);
-                                      setCopiedLyrics(true);
-                                      setTimeout(() => setCopiedLyrics(false), 2000);
-                                    }
-                                  }}
-                                  disabled={!lyricsEditValue}
-                                  className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-[#6A6864] hover:text-[#C96442] hover:bg-[#FAF0EB] bg-white border border-[#E7E5DF] rounded-lg transition-colors cursor-pointer shadow-2xs disabled:opacity-40"
-                                  title="코드 및 가사 텍스트 복사"
-                                >
-                                  {copiedLyrics ? (
-                                    <>
-                                      <Check className="w-3.5 h-3.5 text-emerald-600" />
-                                      <span className="text-emerald-600 font-bold text-[11px]">복사됨</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Copy className="w-3.5 h-3.5" />
-                                      <span className="text-[11px]">복사</span>
-                                    </>
-                                  )}
-                                </button>
-
-                                {/* 저장 버튼 */}
-                                <button
-                                  onClick={handleSaveLyrics}
-                                  disabled={isSavingLyrics}
-                                  className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer shadow-2xs ${
-                                    lyricsSavedNotice
-                                      ? 'bg-emerald-600 text-white'
-                                      : 'bg-[#C96442] hover:bg-[#B55434] text-white active:scale-95'
-                                  }`}
-                                  title="가사 및 코드 변경사항 저장"
-                                >
-                                  {lyricsSavedNotice ? (
-                                    <>
-                                      <Check className="w-3.5 h-3.5 stroke-[2.5px]" />
-                                      <span className="text-[11px]">저장됨</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Save className="w-3.5 h-3.5 stroke-[2px]" />
-                                      <span className="text-[11px]">{isSavingLyrics ? '저장중' : '저장'}</span>
-                                    </>
-                                  )}
-                                </button>
-                              </div>
+                            {/* 조옮김 컨트롤러 (코드 듣기 바로 옆) */}
+                            <div className="flex items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-lg border border-[#E7E5DF] shadow-2xs shrink-0">
+                              <span className="text-[10px] font-bold text-[#8C877D] mr-1 shrink-0">조옮김</span>
+                              <button
+                                type="button"
+                                onClick={() => handleTranspose(-1)}
+                                className="w-5 h-5 shrink-0 flex items-center justify-center hover:bg-[#FAF0EB] text-[#2C2B29] hover:text-[#C96442] font-bold rounded text-xs transition-colors cursor-pointer"
+                                title="반음 내리기 (-1)"
+                              >
+                                -
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (transposeOffset !== 0) handleTranspose(-transposeOffset);
+                                }}
+                                className="w-9 h-5 shrink-0 flex items-center justify-center text-[10px] font-mono font-bold text-[#4A4741] hover:text-[#C96442] cursor-pointer text-center"
+                                title="원래 키로 리셋"
+                              >
+                                {transposeOffset === 0 ? '원키' : `${transposeOffset > 0 ? `+${transposeOffset}` : transposeOffset}`}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleTranspose(1)}
+                                className="w-5 h-5 shrink-0 flex items-center justify-center hover:bg-[#FAF0EB] text-[#2C2B29] hover:text-[#C96442] font-bold rounded text-xs transition-colors cursor-pointer"
+                                title="반음 올리기 (+1)"
+                              >
+                                +
+                              </button>
                             </div>
 
-                            {/* 상단 2열: [코드생성기] [코드 듣기 / 텍스트 돌아가기] 나란히 배치 + 설명글 */}
-                            <div className="flex flex-col gap-1.5 pt-1.5 border-t border-[#E7E5DF]/70">
-                              <div className="flex items-center justify-between gap-2 flex-wrap">
-                                {/* 버튼 그룹: 항상 나란히 배치 */}
-                                <div className="flex items-center gap-1.5 shrink-0">
-                                  {/* 코드생성기 버튼 (검정색) */}
-                                  <button
-                                    type="button"
-                                    onClick={() => setShowChordBuilder(true)}
-                                    className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-white bg-[#18181B] hover:bg-[#27272A] border border-[#27272A] rounded-lg transition-all cursor-pointer shadow-2xs shrink-0 active:scale-95"
-                                    title="12반음 코드 조합 생성기 열기"
-                                  >
-                                    <Plus className="w-3 h-3 stroke-[2.5px]" />
-                                    <span>코드생성기</span>
-                                  </button>
-
-                                  {/* 모드 전환: [코드 듣기(검정)] vs [텍스트 돌아가기(흰색)] */}
-                                  {chordViewMode === 'edit' ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setChordViewMode('play');
-                                        setShowVirtualPiano(true);
-                                      }}
-                                      className="flex items-center gap-1.5 px-3 py-1 bg-[#18181B] hover:bg-[#27272A] text-white border border-[#27272A] rounded-lg text-[11px] font-bold transition-all shadow-2xs cursor-pointer active:scale-95 shrink-0"
-                                      title="코드를 터치하여 소리를 듣고 건반으로 확인하는 코드 듣기 모드로 전환"
-                                    >
-                                      <Volume2 className="w-3.5 h-3.5 text-[#F5A623]" />
-                                      <span>코드 듣기</span>
-                                    </button>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setChordViewMode('edit');
-                                        setShowVirtualPiano(false);
-                                      }}
-                                      className="flex items-center gap-1.5 px-3 py-1 bg-white hover:bg-[#FAF9F5] text-[#2C2B29] hover:text-[#C96442] border border-[#E7E5DF] hover:border-[#F1D3C6] rounded-lg text-[11px] font-bold transition-all shadow-2xs cursor-pointer active:scale-95 shrink-0"
-                                      title="직접 가사와 코드를 타이핑하여 수정하는 텍스트 편집 모드로 복귀"
-                                    >
-                                      <Edit2 className="w-3.5 h-3.5 text-[#C96442]" />
-                                      <span>텍스트 돌아가기</span>
-                                    </button>
-                                  )}
-                                </div>
-
-                                {/* 코드 듣기 모드일 때 등장하는 악기 선택기 (피아노 기타 스트링 - 아이콘 삭제) */}
-                                {chordViewMode === 'play' && (
-                                  <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-[#E7E5DF] shrink-0">
-                                    {(['piano', 'guitar', 'strings'] as InstrumentType[]).map((inst) => {
-                                      const labels: Record<InstrumentType, string> = {
-                                        piano: '피아노',
-                                        guitar: '기타',
-                                        strings: '스트링'
-                                      };
-                                      return (
-                                        <button
-                                          key={inst}
-                                          type="button"
-                                          onClick={() => setSelectedInstrument(inst)}
-                                          className={`px-2 py-0.5 rounded-md text-[10px] font-medium transition-all cursor-pointer ${
-                                            selectedInstrument === inst
-                                              ? 'bg-[#C96442] text-white font-bold shadow-2xs'
-                                              : 'text-[#6A6864] hover:text-[#2C2B29]'
-                                          }`}
-                                        >
-                                          {labels[inst]}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* 설명글: 코드듣기 전 vs 후 */}
-                              <div className="text-[11px] text-[#6A6864] font-medium tracking-tight">
-                                {chordViewMode === 'edit'
-                                  ? 'AI 특성상 가사&코드 싱크가 안맞을 경우 아래 수정하세요'
-                                  : '코드를 수정하려면 버튼을 누르세요'
+                            {/* 복사 버튼 (조옮김 바로 옆) */}
+                            <button
+                              onClick={() => {
+                                if (lyricsEditValue) {
+                                  navigator.clipboard.writeText(lyricsEditValue);
+                                  setCopiedLyrics(true);
+                                  setTimeout(() => setCopiedLyrics(false), 2000);
                                 }
-                              </div>
-                            </div>
+                              }}
+                              disabled={!lyricsEditValue}
+                              className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-[#6A6864] hover:text-[#C96442] hover:bg-[#FAF0EB] bg-white border border-[#E7E5DF] rounded-lg transition-colors cursor-pointer shadow-2xs disabled:opacity-40 shrink-0"
+                              title="코드 및 가사 텍스트 복사"
+                            >
+                              {copiedLyrics ? (
+                                <>
+                                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span className="text-emerald-600 font-bold text-[11px]">복사됨</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3.5 h-3.5" />
+                                  <span className="text-[11px]">복사</span>
+                                </>
+                              )}
+                            </button>
                           </div>
 
                           {/* 본문: 기본 텍스트 수정 모드(textarea) vs 코드 듣기 모드(InteractiveChordViewer) */}
@@ -1551,7 +1616,7 @@ export const HymnalModule: React.FC = () => {
                                 />
                               </div>
                             ) : (
-                              <div className="flex-1 flex flex-col overflow-hidden relative">
+                              <div className="flex-1 p-3 bg-white flex flex-col min-h-0 overflow-hidden relative">
                                 <InteractiveChordViewer
                                   text={lyricsEditValue}
                                   instrument={selectedInstrument}
@@ -1587,6 +1652,7 @@ export const HymnalModule: React.FC = () => {
                         </>
                       ) : (
                         <SongFormBuilder
+                          ref={songFormRef}
                           title={selectedSong?.title || '찬양 곡'}
                           songKey={selectedSong?.code || 'C'}
                           meter={selectedSong?.meter || '4/4'}
@@ -1596,6 +1662,10 @@ export const HymnalModule: React.FC = () => {
                           initialBlocks={selectedSong?.songFormBlocks}
                           initialSongFormText={selectedSong?.songForm}
                           isSaving={isSavingSongForm}
+                          onSaved={() => {
+                            setSongFormSavedNotice(true);
+                            setTimeout(() => setSongFormSavedNotice(false), 2000);
+                          }}
                           onSave={async (data) => {
                             if (!selectedSongId || !selectedSong) return;
                             setIsSavingSongForm(true);
@@ -1627,30 +1697,44 @@ export const HymnalModule: React.FC = () => {
                           }}
                         />
                       )}
-                    </div>
+                    </motion.div>
                   )}
+                </AnimatePresence>
                 </div>
 
-                {/* 2. Youtube Player Side Panel (악보패널 옆에 나란히 flex 아이템으로 배치되어 악보패널을 밀어냄, 드래그 크기 조절 가능) */}
+                {/* 2. Youtube Player Side Panel (모바일에서는 전체화면, 데스크톱에서는 우측 배치) */}
                 <AnimatePresence>
                   {showYoutubePlayer && selectedSong && (
                     <motion.div 
                       key="youtube-player"
                       initial={{ width: 0, opacity: 0 }}
-                      animate={{ width: youtubeWidth, opacity: 1 }}
-                      exit={{ width: 0, opacity: 0 }}
-                      transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-                      className="h-full bg-white border-l border-[#E7E5DF] flex flex-col shadow-xl relative z-30 shrink-0 overflow-hidden"
-                      style={{ width: `${youtubeWidth}px` }}
+                      animate={{ 
+                        width: isMobile ? '100%' : youtubeWidth, 
+                        opacity: 1 
+                      }}
+                      exit={{ 
+                        width: 0, 
+                        opacity: 0,
+                        transition: { duration: 0.16, ease: 'easeOut' }
+                      }}
+                      transition={{ duration: 0.2, ease: 'easeOut' }}
+                      className={`h-full bg-white flex flex-col shadow-xl overflow-hidden ${
+                        isMobile 
+                          ? 'absolute inset-0 z-50 w-full' 
+                          : 'border-l border-[#E7E5DF] shrink-0 relative z-30'
+                      }`}
+                      style={{ width: isMobile ? '100%' : `${youtubeWidth}px` }}
                     >
-                      {/* 좌측 리사이즈 드래그 핸들 (유튜브 창 크기 조정 가능 - 붉은색 효과 완전 삭제) */}
-                      <div
-                        onMouseDown={() => setIsResizingYoutube(true)}
-                        className="absolute top-0 bottom-0 left-0 w-3.5 cursor-col-resize hover:bg-black/5 active:bg-black/10 transition-colors z-50 flex items-center justify-center -translate-x-1.5 group select-none"
-                        title="좌우로 드래그하여 유튜브 창 크기 조절"
-                      >
-                        <div className="w-0.5 h-8 bg-[#D0CDC7] group-hover:bg-[#8C877D] group-hover:h-12 group-active:bg-[#5C5953] rounded-full transition-all" />
-                      </div>
+                      {/* 좌측 리사이즈 드래그 핸들 (데스크톱에서만 노출) */}
+                      {!isMobile && (
+                        <div
+                          onMouseDown={() => setIsResizingYoutube(true)}
+                          className="absolute top-0 bottom-0 left-0 w-3.5 cursor-col-resize hover:bg-black/5 active:bg-black/10 transition-colors z-50 flex items-center justify-center -translate-x-1.5 group select-none"
+                          title="좌우로 드래그하여 유튜브 창 크기 조절"
+                        >
+                          <div className="w-0.5 h-8 bg-[#D0CDC7] group-hover:bg-[#8C877D] group-hover:h-12 group-active:bg-[#5C5953] rounded-full transition-all" />
+                        </div>
+                      )}
 
                       <div className="w-full flex flex-col h-full overflow-hidden bg-white">
                         {/* 1. 패널 헤더 */}
@@ -1664,9 +1748,10 @@ export const HymnalModule: React.FC = () => {
                                </span>
                              )}
                           </div>
+                          {/* 탭 버튼과 겹치지 않도록 안쪽으로 더 여유 있게 배치 (mr-2.5) */}
                           <button 
                             onClick={() => setShowYoutubePlayer(false)} 
-                            className="p-1 hover:bg-[#F5F3ED] rounded-lg cursor-pointer transition-colors"
+                            className="mr-2 p-1.5 hover:bg-[#F5F3ED] rounded-lg cursor-pointer transition-colors"
                             title="유튜브 창 닫기"
                           >
                             <X className="w-4 h-4 text-[#A3A19B] hover:text-[#2C2B29] stroke-[1.8px]" />
